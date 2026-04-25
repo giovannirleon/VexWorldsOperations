@@ -948,6 +948,10 @@ function AppScreen() {
   }
 
   function handleNextToAcknowledgement() {
+    if (!selectedTeam?.preCheckedIn) {
+      return;
+    }
+
     const actualWristbands = Number(wristbandsActualInput);
 
     if (
@@ -1832,16 +1836,25 @@ function AppScreen() {
                     </div>
                   </div>
                 ) : !selectedTeam.checkedIn && checkInStep === "wristbands" ? (
-                  <div className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[24px] border border-slate-200 bg-slate-50 p-3.5">
-                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                      Wristbands and Parking
-                    </p>
-                    <p className="mt-1.5 text-sm font-semibold text-slate-700">
-                      Estimated Wristbands are{" "}
-                      {selectedTeam.wristbandsEstimated}
-                    </p>
+                  <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[24px] border border-slate-200 bg-slate-50 p-3.5">
+                    <div
+                      className={`transition ${
+                        selectedTeam.preCheckedIn
+                          ? ""
+                          : "pointer-events-none select-none blur-[2px] opacity-45"
+                      }`}
+                      aria-hidden={!selectedTeam.preCheckedIn}
+                    >
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                        Wristbands and Parking
+                      </p>
+                      <p className="mt-1.5 text-sm font-semibold text-slate-700">
+                        Estimated Wristbands are{" "}
+                        {selectedTeam.wristbandsEstimated}
+                      </p>
 
-                    <div className="mt-2.5 grid gap-2.5 lg:grid-cols-[1fr_auto] lg:items-start">
+                      <div className="mt-2.5 space-y-2.5">
+                    <div className="grid gap-2.5 lg:grid-cols-[1fr_auto] lg:items-start">
                       <label className="grid gap-1.5">
                         <span className="text-sm font-semibold text-slate-700">
                           Enter the actual number of wristbands
@@ -1943,6 +1956,18 @@ function AppScreen() {
                         Next
                       </button>
                     </div>
+                      </div>
+                    </div>
+
+                    {!selectedTeam.preCheckedIn ? (
+                      <div className="absolute inset-0 flex items-center justify-center rounded-[24px] bg-white/30 px-6 text-center">
+                        <div className="max-w-xl rounded-3xl border border-amber-200 bg-amber-50/95 px-5 py-4 shadow-sm backdrop-blur-sm">
+                          <p className="text-sm font-semibold leading-6 text-amber-950 sm:text-base">
+                            Team check-in unlocks after the Online Check-In Form is submitted. Changes can take up to 1 minute to appear.
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : !selectedTeam.checkedIn &&
                   checkInStep === "acknowledgement" ? (
