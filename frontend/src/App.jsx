@@ -534,6 +534,12 @@ function AppScreen() {
   const [pickupNameError, setPickupNameError] = useState("");
   const [pickupPhoneError, setPickupPhoneError] = useState("");
   const [isSavingTeam, setIsSavingTeam] = useState(false);
+  const [pickupResult, setPickupResult] = useState(null);
+  const [pickupResultMessage, setPickupResultMessage] = useState("");
+  const [pickupSummary, setPickupSummary] = useState({
+    wristbandsActual: 0,
+    parkingPass: false,
+  });
   const signaturePadRef = useRef(null);
   const checkedInPanelTouchStartXRef = useRef(null);
   const selectedEventId =
@@ -755,12 +761,18 @@ function AppScreen() {
       setCopiedField("");
       setCheckedInPanel("signature");
       setCheckInStep("wristbands");
+      setPickupResult(null);
+      setPickupResultMessage("");
       setWristbandsActualInput(
         selectedTeam.wristbandsActual === null
           ? ""
           : String(selectedTeam.wristbandsActual),
       );
       setParkingPassInput(selectedTeam.parkingPass);
+      setPickupSummary({
+        wristbandsActual: selectedTeam.wristbandsActual ?? 0,
+        parkingPass: selectedTeam.parkingPass,
+      });
       setWristbandsError("");
       setPickupNotes(selectedTeam.pickupNotes ?? "");
       setPickupName("");
@@ -874,6 +886,8 @@ function AppScreen() {
     setSignatureNoticeTone("info");
     setCopiedField("");
     setCheckedInPanel("signature");
+    setPickupResult(null);
+    setPickupResultMessage("");
     signaturePadRef.current?.clear();
   }
 
@@ -1012,6 +1026,8 @@ function AppScreen() {
     setIsSavingTeam(true);
     setSignatureNotice("");
     setSignatureNoticeTone("info");
+    setPickupResult(null);
+    setPickupResultMessage("");
 
     try {
       const signatureBlob = await (await fetch(signaturePreview)).blob();
@@ -1065,11 +1081,19 @@ function AppScreen() {
           team.id === updatedTeam.id ? updatedTeam : team,
         ),
       );
-      signaturePadRef.current.clear();
-      closeTeamModal();
+      signaturePadRef.current?.clear();
+      setPickupSummary({
+        wristbandsActual: Number(wristbandsActualInput),
+        parkingPass: parkingPassInput,
+      });
+      setPickupResult("success");
+      setCheckInStep("result");
     } catch (error) {
-      setSignatureNotice(error.message || "Failed to confirm pickup.");
-      setSignatureNoticeTone("error");
+      setPickupResult("error");
+      setPickupResultMessage(
+        error.message || "Something went wrong while recording this pickup.",
+      );
+      setCheckInStep("result");
     } finally {
       setIsSavingTeam(false);
     }
@@ -1725,7 +1749,89 @@ function AppScreen() {
               </div>
 
               <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
-                {selectedTeam.signaturePreview ? (
+                {checkInStep === "result" ? (
+                  <div className="flex min-h-0 flex-1 flex-col justify-center rounded-[24px] border border-slate-200 bg-slate-50 p-4 sm:p-6">
+                    {pickupResult === "success" ? (
+                      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center text-center">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                          Pickup Recorded
+                        </p>
+                        <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-950">
+                          Give this team:
+                        </h3>
+                        <div
+                          className={`mt-5 grid gap-3 ${
+                            pickupSummary.parkingPass
+                              ? "sm:grid-cols-3"
+                              : "mx-auto w-full max-w-lg sm:grid-cols-2"
+                          }`}
+                        >
+                          <div className="rounded-3xl border border-slate-200 bg-white px-4 py-5">
+                            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                              Bag
+                            </p>
+                            <p className="mt-2 text-3xl font-black text-slate-950">
+                              1
+                            </p>
+                          </div>
+                          <div className="rounded-3xl border border-slate-200 bg-white px-4 py-5">
+                            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                              Wristbands
+                            </p>
+                            <p className="mt-2 text-3xl font-black text-slate-950">
+                              {pickupSummary.wristbandsActual}
+                            </p>
+                          </div>
+                          {pickupSummary.parkingPass ? (
+                            <div className="rounded-3xl border border-slate-200 bg-white px-4 py-5">
+                              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                                Parking Pass
+                              </p>
+                              <p className="mt-2 text-3xl font-black text-slate-950">
+                                1
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="mt-6 flex justify-center">
+                          <button
+                            type="button"
+                            className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                            onClick={closeTeamModal}
+                          >
+                            OK
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center text-center">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-500">
+                          Something Went Wrong
+                        </p>
+                        <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-950">
+                          Pickup was not recorded.
+                        </h3>
+                        <p className="mt-4 text-base font-medium leading-7 text-slate-600">
+                          {pickupResultMessage ||
+                            "We could not confirm this pickup with the backend."}
+                        </p>
+                        <div className="mt-6 flex justify-center">
+                          <button
+                            type="button"
+                            className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                            onClick={() => {
+                              setPickupResult(null);
+                              setPickupResultMessage("");
+                              setCheckInStep("wristbands");
+                            }}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : selectedTeam.signaturePreview ? (
                   <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-slate-200 bg-slate-50 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
@@ -2048,11 +2154,11 @@ function AppScreen() {
                         </span>
                       </label>
                     </div>
-                    <div className="mt-1 flex min-h-0 flex-1 flex-col rounded-3xl border border-slate-200 bg-white p-3">
+                    <div className="mt-0.5 flex min-h-0 flex-1 flex-col rounded-3xl border border-slate-200 bg-white p-3">
                       <SignaturePadCanvas
                         ref={signaturePadRef}
                         penColor="#132231"
-                        className="min-h-24 flex-1 w-full rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50"
+                        className="min-h-36 flex-1 w-full rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50"
                       />
                       <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
                         <p

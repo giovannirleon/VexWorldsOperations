@@ -20,7 +20,7 @@
   const CONFIG = {
     backendBaseUrl: "http://10.35.5.162:4000",
     syncToken: "test",
-    syncEveryMs: 5 * 60 * 1000,
+    syncEveryMs: 30 * 1000,
     syncOnPageLoad: true,
     syncOnWindowFocus: false,
     debug: true,
@@ -133,7 +133,9 @@
       normalizedText.includes("performing security verification") ||
       normalizedText.includes("verify you are human") ||
       normalizedText.includes("enable javascript and cookies to continue") ||
-      normalizedText.includes("security service to protect against malicious bots") ||
+      normalizedText.includes(
+        "security service to protect against malicious bots",
+      ) ||
       normalizedText.includes("sign in") ||
       normalizedText.includes("login")
     );
@@ -171,7 +173,9 @@
     const csvText = XLSX.utils.sheet_to_csv(firstSheet);
 
     if (!looksLikeCsv(csvText)) {
-      throw new Error("Workbook sheet did not convert into recognizable CSV text.");
+      throw new Error(
+        "Workbook sheet did not convert into recognizable CSV text.",
+      );
     }
 
     return csvText;
@@ -188,7 +192,9 @@
       },
     });
     const arrayBuffer = await response.arrayBuffer();
-    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    const contentType = String(
+      response.headers.get("content-type") || "",
+    ).toLowerCase();
     const contentDisposition = String(
       response.headers.get("content-disposition") || "",
     ).toLowerCase();
@@ -222,7 +228,9 @@
     }
 
     if (!looksLikeCsv(csvText)) {
-      throw new Error("RobotEvents report response did not look like CSV data.");
+      throw new Error(
+        "RobotEvents report response did not look like CSV data.",
+      );
     }
 
     return {
