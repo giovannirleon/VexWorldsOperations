@@ -469,19 +469,44 @@ function StatBadge({ value }) {
   );
 }
 
-function DetailCard({ label, value, copyKey, copiedField, onCopy }) {
+function DetailCard({
+  label,
+  value,
+  copyKey,
+  copiedField,
+  onCopy,
+  compact = false,
+}) {
   return (
-    <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-      <p className="text-[0.68rem] font-bold uppercase tracking-[0.16em] text-slate-500">
+    <article
+      className={`rounded-xl border border-slate-200 bg-slate-50 ${
+        compact ? "px-3 py-2.5" : "p-3"
+      }`}
+    >
+      <p
+        className={`font-bold uppercase tracking-[0.16em] text-slate-500 ${
+          compact ? "text-[0.64rem]" : "text-[0.68rem]"
+        }`}
+      >
         {label}
       </p>
-      <div className="mt-2 flex items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+      <div
+        className={`flex items-start justify-between gap-2 ${
+          compact ? "mt-1.5" : "mt-2"
+        }`}
+      >
+        <p
+          className={`min-w-0 flex-1 truncate text-slate-800 ${
+            compact ? "text-[0.95rem] font-semibold" : "text-sm font-medium"
+          }`}
+        >
           {value}
         </p>
         <button
           type="button"
-          className="shrink-0 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-100"
+          className={`shrink-0 rounded-full border border-slate-300 bg-white font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 ${
+            compact ? "px-2.5 py-0.5 text-[0.7rem]" : "px-2.5 py-1 text-xs"
+          }`}
           onClick={(event) => onCopy(event, copyKey, value)}
         >
           {copiedField === copyKey ? "Copied" : "Copy"}
@@ -641,14 +666,18 @@ function StyledSelect({ value, onChange, children, className = "" }) {
   );
 }
 
-function BreakdownTooltip({ items, align = "left" }) {
+function BreakdownTooltip({ items, align = "left", isOpen = false }) {
   if (!items || items.length === 0) {
     return null;
   }
 
   return (
     <div
-      className={`pointer-events-none absolute top-full z-20 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-[0_18px_50px_rgba(15,23,42,0.18)] opacity-0 transition duration-150 group-hover:opacity-100 ${
+      className={`absolute top-full z-20 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-[0_18px_50px_rgba(15,23,42,0.18)] transition duration-150 ${
+        isOpen
+          ? "pointer-events-auto opacity-100"
+          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
+      } ${
         align === "right" ? "right-0" : "left-0"
       }`}
     >
@@ -675,14 +704,28 @@ function BreakdownTooltip({ items, align = "left" }) {
 }
 
 function CombinedMetricCard({
+  tooltipKey,
   title,
   value,
   preview,
   tooltipItems,
   className = "",
+  activeTooltipKey,
+  onToggleTooltip,
 }) {
   return (
-    <article className={`group relative rounded-2xl px-5 py-4 text-white ${className}`}>
+    <article
+      className={`group relative cursor-pointer rounded-2xl px-5 py-4 text-white ${className}`}
+      onClick={() => onToggleTooltip(tooltipKey)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onToggleTooltip(tooltipKey);
+        }
+      }}
+    >
       <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/70">
         {title}
       </p>
@@ -690,7 +733,10 @@ function CombinedMetricCard({
       <p className="mt-2 truncate text-sm font-semibold text-white/75">
         {preview}
       </p>
-      <BreakdownTooltip items={tooltipItems} />
+      <BreakdownTooltip
+        items={tooltipItems}
+        isOpen={activeTooltipKey === tooltipKey}
+      />
     </article>
   );
 }
@@ -780,6 +826,7 @@ function AppScreen() {
     wristbandsActual: 0,
     parkingPass: false,
   });
+  const [activeCombinedTooltipKey, setActiveCombinedTooltipKey] = useState("");
   const signaturePadRef = useRef(null);
   const checkedInPanelTouchStartXRef = useRef(null);
   const selectedEventId =
@@ -914,7 +961,11 @@ function AppScreen() {
   const selectedTeamWristbandsSummary =
     selectedTeam === null
       ? ""
-      : selectedTeam.checkedIn && selectedTeam.wristbandsActual !== null
+      : !selectedTeam.checkedIn &&
+          wristbandsActualInput !== "" &&
+          checkInStep !== "wristbands"
+        ? wristbandsActualInput
+        : selectedTeam.checkedIn && selectedTeam.wristbandsActual !== null
         ? String(selectedTeam.wristbandsActual)
         : selectedTeam.preCheckedIn
           ? `${selectedTeam.wristbandsEstimated} (est)`
@@ -1051,6 +1102,7 @@ function AppScreen() {
 
     return [
       {
+        tooltipKey: "combined-total-teams",
         title: "Total Teams",
         value: totalTeams,
         preview: combinedBreakdowns.map((item) => item.totalTeams).join(" / "),
@@ -1062,6 +1114,7 @@ function AppScreen() {
         className: "bg-slate-950",
       },
       {
+        tooltipKey: "combined-pre-checked",
         title: "Pre-Checked",
         value: preCheckedCount,
         preview: combinedBreakdowns.map((item) => item.preChecked).join(" / "),
@@ -1073,6 +1126,7 @@ function AppScreen() {
         className: "bg-amber-500",
       },
       {
+        tooltipKey: "combined-fully-checked",
         title: "Fully Checked",
         value: fullyCheckedCount,
         preview: combinedBreakdowns.map((item) => item.fullyChecked).join(" / "),
@@ -1239,6 +1293,10 @@ function AppScreen() {
   useEffect(() => {
     setSelectedTeamId(null);
     setCurrentPage(1);
+  }, [selectedCombinedId, selectedEventId]);
+
+  useEffect(() => {
+    setActiveCombinedTooltipKey("");
   }, [selectedCombinedId, selectedEventId]);
 
   useEffect(() => {
@@ -1459,6 +1517,12 @@ function AppScreen() {
     setCombinedDashboards((current) => [...current, nextDashboard]);
     closeCombinedDashboardModal();
     navigate(`/combined/${nextDashboard.id}`);
+  }
+
+  function handleToggleCombinedTooltip(tooltipKey) {
+    setActiveCombinedTooltipKey((current) =>
+      current === tooltipKey ? "" : tooltipKey,
+    );
   }
 
   function handleRemoveCombinedDashboard(event, dashboardId) {
@@ -2117,7 +2181,12 @@ function AppScreen() {
             <div className="grid gap-3 sm:grid-cols-3">
               {isCombinedView
                 ? combinedMetricCards.map((card) => (
-                    <CombinedMetricCard key={card.title} {...card} />
+                    <CombinedMetricCard
+                      key={card.title}
+                      {...card}
+                      activeTooltipKey={activeCombinedTooltipKey}
+                      onToggleTooltip={handleToggleCombinedTooltip}
+                    />
                   ))
                 : (
                   <>
@@ -2703,6 +2772,7 @@ function AppScreen() {
                   copyKey="organization"
                   copiedField={copiedField}
                   onCopy={handleCopy}
+                  compact
                 />
                 <DetailCard
                   label="Contact Name"
@@ -2710,6 +2780,7 @@ function AppScreen() {
                   copyKey="contactName"
                   copiedField={copiedField}
                   onCopy={handleCopy}
+                  compact
                 />
                 <DetailCard
                   label="Contact Number"
@@ -2717,6 +2788,7 @@ function AppScreen() {
                   copyKey="contactNumber"
                   copiedField={copiedField}
                   onCopy={handleCopy}
+                  compact
                 />
               </div>
 
@@ -3174,13 +3246,10 @@ function AppScreen() {
                       </label>
                     </div>
                     <div className="mt-0.5 flex min-h-0 flex-1 flex-col rounded-3xl border border-slate-200 bg-white p-3">
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                        Signature
-                      </p>
                       <SignaturePadCanvas
                         ref={signaturePadRef}
                         penColor="#132231"
-                        className="mt-2 min-h-36 flex-1 w-full rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50"
+                        className="min-h-36 flex-1 w-full rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50"
                       />
                       <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
                         <p
