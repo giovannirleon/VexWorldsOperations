@@ -70,10 +70,11 @@ if [ ! -f "node_modules/vite/package.json" ]; then
   exit 1
 fi
 
+echo "Building frontend assets on the host..."
+npm run build
+
 echo "Building frontend image..."
-"${DOCKER_COMPOSE_CMD[@]}" build \
-  --build-arg "VITE_API_BASE_URL=${VITE_API_BASE_URL:-}" \
-  web
+"${DOCKER_COMPOSE_CMD[@]}" build web
 
 echo "Starting Nginx frontend..."
 "${DOCKER_COMPOSE_CMD[@]}" up -d web
