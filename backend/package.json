@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch src/index.js",
+    "dev": "bash -lc 'if [ -f .env ]; then exec node --env-file=.env --watch src/index.js; else exec node --watch src/index.js; fi'",
     "start": "node --env-file-if-exists=.env src/index.js",
     "migrate": "node --env-file-if-exists=.env scripts/migrate.js",
     "deploy": "bash scripts/deploy.sh"
