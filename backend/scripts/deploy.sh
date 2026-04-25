@@ -34,6 +34,20 @@ if [ -z "${ROBOTEVENTS_SYNC_TOKEN:-}" ]; then
   echo "Generated missing ROBOTEVENTS_SYNC_TOKEN"
 fi
 
+if [ -z "${ROBOTEVENTS_API_KEY:-}" ]; then
+  echo "ROBOTEVENTS_API_KEY is not set."
+  read -r -p "Enter your RobotEvents API key: " ROBOTEVENTS_API_KEY
+
+  if [ -z "${ROBOTEVENTS_API_KEY:-}" ]; then
+    echo "RobotEvents API key is required for event imports."
+    exit 1
+  fi
+
+  upsert_env_var ".env" "ROBOTEVENTS_API_KEY" "$ROBOTEVENTS_API_KEY"
+  export ROBOTEVENTS_API_KEY
+  echo "Saved ROBOTEVENTS_API_KEY to backend/.env"
+fi
+
 set_userscript_config_value \
   "$ROOT_DIR/../scripts/tampermonkey-checkin-sync.user.js" \
   "syncToken" \
@@ -89,10 +103,6 @@ done
 upsert_env_var ".env" "CORS_ALLOWED_ORIGINS" "$CORS_ALLOWED_ORIGINS"
 export CORS_ALLOWED_ORIGINS
 echo "Using CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS"
-
-if [ -z "${ROBOTEVENTS_API_KEY:-}" ]; then
-  echo "ROBOTEVENTS_API_KEY is empty in backend/.env. Event imports will not work until you set a real key."
-fi
 
 if docker compose version >/dev/null 2>&1; then
   DOCKER_COMPOSE_CMD=(docker compose)
