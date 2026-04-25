@@ -1,27 +1,32 @@
 # WorldsCheckIn
 
-WorldsCheckIn is an event-scoped team check-in app for RobotEvents events.
+WorldsCheckIn is a deployment-first check-in system for RobotEvents events.
 
-It has:
-- a `backend/` service built with Node.js, Express, PostgreSQL, and Docker Compose
-- a `frontend/` app built with React and Vite
-- a Tampermonkey sync script in `scripts/tampermonkey-checkin-sync.user.js` that downloads the protected RobotEvents checked-in report from your logged-in browser session and uploads it to the backend
+This repo contains:
+- `backend/`: Node.js API, PostgreSQL migrations, Docker deployment
+- `frontend/`: React app served by Nginx
+- `scripts/tampermonkey-checkin-sync.user.js`: browser-side RobotEvents sync script
 
-## Project Structure
-
-- `backend/`: API, database migrations, Docker deploy script
-- `frontend/`: React app, Vite dev server, Docker deploy script
-- `scripts/`: shared shell helpers and the Tampermonkey script template
-
-## Requirements
+## What You Need
 
 - Git
-- Node.js 22+ and npm
+- Node.js 22+
+- npm
 - Docker with Docker Compose
 - A RobotEvents API key
-- A browser with Tampermonkey installed for the checked-in report sync
+- A browser with Tampermonkey installed
 
-## Quick Start After Cloning
+## Deployment Flow
+
+After pulling from GitHub, the normal order is:
+
+1. deploy the backend
+2. deploy the frontend
+3. install the Tampermonkey script
+4. import an event
+5. run sync from the RobotEvents admin `checkIn` page
+
+## Start Here
 
 ### 1. Clone the repo
 
@@ -30,7 +35,15 @@ git clone <your-repo-url>
 cd WorldsCheckIn
 ```
 
-### 2. Deploy the backend
+### 2. Choose your deployment branch
+
+- macOS or Linux: continue to [Standard Deployment](#standard-deployment)
+- Windows with WSL and local-network access required: do [Windows / WSL Setup](#windows--wsl-setup) first, then continue to [Standard Deployment](#standard-deployment)
+- Windows without WSL: not recommended for this repo
+
+## Standard Deployment
+
+### 1. Deploy the backend
 
 ```bash
 cd backend
@@ -38,8 +51,8 @@ npm run deploy
 ```
 
 What backend deploy does:
-- creates `backend/.env` automatically if it does not exist
-- keeps these database settings hardcoded:
+- creates `backend/.env` if it is missing
+- keeps these values fixed:
 
 ```env
 PORT=4000
@@ -50,113 +63,76 @@ POSTGRES_PORT=5432
 DATABASE_URL=postgresql://postgres:postgres@db:5432/worldscheckin
 ```
 
+- prompts for `ROBOTEVENTS_API_KEY` if missing
 - generates `ROBOTEVENTS_SYNC_TOKEN` if missing
-- lists your machine’s IPv4 interfaces and asks which frontend IPs should be allowed in `CORS_ALLOWED_ORIGINS`
-- always includes `http://localhost:5173` in `CORS_ALLOWED_ORIGINS`
-- starts Postgres
+- asks which outward-facing frontend IPs to allow in `CORS_ALLOWED_ORIGINS`
+- always includes `http://localhost:5173`
+- starts PostgreSQL
 - runs migrations
 - builds and starts the backend container
-- updates the Tampermonkey template with the current sync token
+- updates the Tampermonkey template `syncToken`
 
-### 3. Add your RobotEvents API key
+Expected backend URLs:
 
-After backend deploy, open:
-
-[`backend/.env`](backend/.env)
-
-and set:
-
-```env
-ROBOTEVENTS_API_KEY=your_real_robot_events_api_key
+```text
+http://localhost:4000
+http://YOUR_IP:4000
 ```
 
-Then redeploy the backend:
+### 2. Deploy the frontend
 
 ```bash
-cd backend
-npm run deploy
-```
-
-### 4. Deploy the frontend
-
-```bash
-cd frontend
+cd ../frontend
 npm run deploy
 ```
 
 What frontend deploy does:
-- creates `frontend/.env` automatically if it does not exist
-- lists your machine’s IPv4 interfaces and asks which backend IP should be used for `VITE_API_BASE_URL`
-- builds the frontend Docker image
-- starts the Nginx frontend container
-- updates the Tampermonkey template with the current backend base URL
+- creates `frontend/.env` if it is missing
+- asks which backend IP to use for `VITE_API_BASE_URL`
+- installs frontend dependencies on the host
+- builds the frontend on the host
+- builds a lightweight Nginx image that serves `dist/`
+- starts the frontend container
+- updates the Tampermonkey template `backendBaseUrl`
 
-### 5. Install the Tampermonkey sync script
+Expected frontend URLs:
+
+```text
+http://localhost:8080
+http://YOUR_IP:8080
+```
+
+### 3. Install the Tampermonkey script
 
 Open:
 
 [`scripts/tampermonkey-checkin-sync.user.js`](scripts/tampermonkey-checkin-sync.user.js)
 
-After backend and frontend deploy, that file will have:
-- `backendBaseUrl` set automatically
-- `syncToken` set automatically
+The deploy scripts automatically stamp this file with:
+- `backendBaseUrl`
+- `syncToken`
 
-Copy that script into Tampermonkey and enable it.
+To install it:
+1. open Tampermonkey
+2. create a new script
+3. paste in the contents of `scripts/tampermonkey-checkin-sync.user.js`
+4. save and enable it
 
-The script runs on RobotEvents check-in admin pages and:
-- downloads the `checkedInReport`
-- converts the RobotEvents `.xlsx` workbook to CSV in the browser
-- uploads the CSV to the backend
+### 4. Use the app
 
-### 6. Use the app
+1. open the frontend
+2. import an event by RobotEvents event code
+3. open that event dashboard
+4. open the matching RobotEvents admin `checkIn` page in the same browser
+5. let the Tampermonkey script upload the checked-in report
 
-Open the frontend at:
+## Windows / WSL Setup
 
-```text
-http://localhost:8080
-```
+Use this branch only if you are deploying from Windows and want the app reachable from other devices on your local network.
 
-or on your server/LAN IP:
+### 1. Enable mirrored networking
 
-```text
-http://<your-ip>:8080
-```
-
-Then:
-1. Import an event by RobotEvents event code
-2. Open that event dashboard
-3. Use the Tampermonkey script while logged into the matching RobotEvents admin `checkIn` page
-
-## Local Development
-
-### Backend dev
-
-```bash
-cd backend
-npm install
-npm run dev
-```
-
-### Frontend dev
-
-```bash
-cd frontend
-npm install
-npm run dev -- --host
-```
-
-Notes:
-- Vite dev defaults to port `5173`
-- `--host` exposes it on your LAN so other devices can reach it
-- backend CORS deploy always includes `http://localhost:5173`
-
-## Windows Deployment
-
-If you are deploying from Windows and want the app to be visible on your local network, use WSL mirrored networking.
-
-Run these commands in **Windows PowerShell as Administrator**.
-
-### 1. Enable mirrored mode for WSL
+Run in Windows PowerShell as Administrator:
 
 ```powershell
 @"
@@ -171,14 +147,14 @@ networkingMode=mirrored
 wsl --shutdown
 ```
 
-### 3. Open Windows Firewall for ports 4000 and 8080
+### 3. Open Windows Firewall for app ports
 
 ```powershell
 New-NetFirewallRule -DisplayName "VexWorldsOperations 4000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4000
 New-NetFirewallRule -DisplayName "VexWorldsOperations 8080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
 ```
 
-### 4. Allow inbound Hyper-V / WSL mirrored networking traffic
+### 4. Only if inbound traffic is still blocked, allow Hyper-V mirrored traffic
 
 ```powershell
 Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -DefaultInboundAction Allow
@@ -190,44 +166,45 @@ Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -D
 wsl
 ```
 
-### 6. Verify from inside WSL
+### 6. Run standard deployment inside WSL
 
-Run your app/deploy there, then from Windows or another LAN device hit:
+```bash
+cd ~/WorldsCheckIn/backend
+npm run deploy
+
+cd ../frontend
+npm run deploy
+```
+
+### 7. Verify from another LAN device
+
+Use the Windows machine's LAN IP:
 
 ```text
 http://YOUR_WINDOWS_LAN_IP:4000
 http://YOUR_WINDOWS_LAN_IP:8080
 ```
 
-## Deploy Scripts
+## Interface Selection Notes
 
-### Backend
+The deploy scripts ask for outward-facing IPs because the app needs them for:
+- `CORS_ALLOWED_ORIGINS`
+- `VITE_API_BASE_URL`
 
-```bash
-cd backend
-npm run deploy
-```
+Environment behavior:
+- macOS: uses Mac interfaces
+- Linux: uses Linux interfaces
+- WSL: uses Windows host outward-facing interfaces, not the WSL private NAT IP
 
-### Frontend
+## Runtime Files
 
-```bash
-cd frontend
-npm run deploy
-```
+- `backend/.env`: real backend config
+- `frontend/.env`: real frontend config
+- `scripts/tampermonkey-checkin-sync.user.js`: Tampermonkey template updated by deploy
 
-Both deploy scripts:
-- detect IPv4 interfaces on macOS and Linux
-- prompt you for the IPs they should use
-- update their local `.env` files
+## Important Notes
 
-## Important Runtime Files
-
-- `backend/.env`: real backend configuration
-- `frontend/.env`: real frontend configuration
-- `scripts/tampermonkey-checkin-sync.user.js`: Tampermonkey template, updated by deploy scripts
-
-## Notes
-
-- `ROBOTEVENTS_API_KEY` is not auto-generated, because it must come from RobotEvents
-- the Tampermonkey script must still be re-copied into Tampermonkey after deploy if you want the updated backend URL or sync token
-- the frontend dashboard refreshes periodically to pick up new synced team data
+- `ROBOTEVENTS_API_KEY` must be entered manually
+- `ROBOTEVENTS_SYNC_TOKEN` is generated automatically if missing
+- if you rerun deploy and the Tampermonkey values change, update the script in Tampermonkey again
+- the frontend dashboard refreshes periodically so synced data appears without a manual page reload
