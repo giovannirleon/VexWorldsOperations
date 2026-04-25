@@ -16,6 +16,73 @@ This repo contains:
 - A RobotEvents API key
 - A browser with Tampermonkey installed
 
+## Install Required Dependencies
+
+Use the branch that matches the machine you are deploying from.
+
+### macOS
+
+Install Homebrew first if you do not already have it:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then install the required tools:
+
+```bash
+brew install git node
+brew install --cask docker
+```
+
+After Docker Desktop is installed:
+1. open Docker Desktop once
+2. wait for Docker to finish starting
+3. verify it works:
+
+```bash
+docker --version
+docker compose version
+node --version
+npm --version
+git --version
+```
+
+### Linux
+
+The exact package commands depend on your distro. Ubuntu and Debian are the most common path:
+
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+Install Docker:
+
+```bash
+sudo apt install -y docker.io docker-compose-v2
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+```
+
+Then restart your shell or log out and back in so the Docker group change applies.
+
+Verify everything:
+
+```bash
+docker --version
+docker compose version
+node --version
+npm --version
+git --version
+```
+
+### Windows
+
+Use WSL for this repo. Follow the [Windows / WSL Setup](#windows--wsl-setup) branch below, then install the Linux dependencies inside your WSL distro using the Linux steps above.
+
 ## Deployment Flow
 
 After pulling from GitHub, the normal order is:

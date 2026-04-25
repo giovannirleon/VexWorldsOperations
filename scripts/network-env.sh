@@ -19,17 +19,58 @@ list_windows_host_ipv4_interfaces() {
     return 1
   fi
 
-  powershell.exe -NoProfile -Command "
-    Get-NetIPAddress -AddressFamily IPv4 |
-      Where-Object {
-        \$_.IPAddress -ne '127.0.0.1' -and
-        \$_.InterfaceAlias -notmatch 'Loopback|WSL|vEthernet|Hyper-V|Default Switch'
-      } |
-      Sort-Object InterfaceAlias, IPAddress |
-      ForEach-Object {
-        \"\$($_.InterfaceAlias)|\$($_.IPAddress)\"
-      }
-  " 2>/dev/null | tr -d '\r' | awk -F'|' '!seen[$0]++ && $1 != "" && $2 != "" { print $0 }'
+  local results=""
+
+  results="$(
+    powershell.exe -NoProfile -Command "
+      Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object {
+          \$_.IPAddress -ne '127.0.0.1' -and
+          \$_.IPAddress -notlike '169.254.*' -and
+          \$_.InterfaceAlias -notmatch 'Loopback|WSL|vEthernet|Hyper-V|Default Switch'
+        } |
+        Sort-Object InterfaceAlias, IPAddress |
+        ForEach-Object {
+          \"\$($_.InterfaceAlias)|\$($_.IPAddress)\"
+        }
+    " 2>/dev/null | tr -d '\r' | awk -F'|' '!seen[$0]++ && $1 != "" && $2 != "" { print $0 }'
+  )"
+
+  if [ -n "$results" ]; then
+    printf "%s\n" "$results"
+    return 0
+  fi
+
+  if ! command -v ipconfig.exe >/dev/null 2>&1; then
+    return 1
+  fi
+
+  ipconfig.exe 2>/dev/null \
+    | tr -d '\r' \
+    | awk '
+        /^[^[:space:]].*:$/ {
+          section = $0
+          sub(/:$/, "", section)
+          next
+        }
+        /IPv4 Address|Autoconfiguration IPv4 Address/ {
+          line = $0
+          sub(/^.*: /, "", line)
+          sub(/\(.*/, "", line)
+          gsub(/[[:space:]]+$/, "", line)
+
+          if (
+            line != "" &&
+            line != "127.0.0.1" &&
+            line !~ /^169\.254\./ &&
+            section !~ /(WSL|vEthernet|Hyper-V|Default Switch|Loopback)/ &&
+            section != ""
+          ) {
+            print section "|" line
+          }
+        }
+      ' \
+    | awk -F'|' '!seen[$0]++ && $1 != "" && $2 != "" { print $0 }'
 }
 
 list_ipv4_interfaces() {
