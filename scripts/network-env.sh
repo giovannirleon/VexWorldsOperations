@@ -2,7 +2,44 @@
 
 set -euo pipefail
 
+is_wsl() {
+  if [ -n "${WSL_INTEROP:-}" ]; then
+    return 0
+  fi
+
+  if [ -r /proc/version ] && grep -qi "microsoft" /proc/version; then
+    return 0
+  fi
+
+  return 1
+}
+
+list_windows_host_ipv4_interfaces() {
+  if ! command -v powershell.exe >/dev/null 2>&1; then
+    return 1
+  fi
+
+  powershell.exe -NoProfile -Command "
+    Get-NetIPAddress -AddressFamily IPv4 |
+      Where-Object {
+        \$_.IPAddress -ne '127.0.0.1' -and
+        \$_.InterfaceAlias -notmatch 'Loopback|WSL|vEthernet|Hyper-V|Default Switch'
+      } |
+      Sort-Object InterfaceAlias, IPAddress |
+      ForEach-Object {
+        \"\$($_.InterfaceAlias)|\$($_.IPAddress)\"
+      }
+  " 2>/dev/null | tr -d '\r' | awk -F'|' '!seen[$0]++ && $1 != "" && $2 != "" { print $0 }'
+}
+
 list_ipv4_interfaces() {
+  if is_wsl; then
+    if list_windows_host_ipv4_interfaces >/dev/null 2>&1; then
+      list_windows_host_ipv4_interfaces
+      return
+    fi
+  fi
+
   if command -v ip >/dev/null 2>&1; then
     ip -o -4 addr show up scope global \
       | awk '{print $2 "|" $4}' \

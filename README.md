@@ -150,6 +150,55 @@ Notes:
 - `--host` exposes it on your LAN so other devices can reach it
 - backend CORS deploy always includes `http://localhost:5173`
 
+## Windows Deployment
+
+If you are deploying from Windows and want the app to be visible on your local network, use WSL mirrored networking.
+
+Run these commands in **Windows PowerShell as Administrator**.
+
+### 1. Enable mirrored mode for WSL
+
+```powershell
+@"
+[wsl2]
+networkingMode=mirrored
+"@ | Set-Content "$env:USERPROFILE\.wslconfig"
+```
+
+### 2. Restart WSL
+
+```powershell
+wsl --shutdown
+```
+
+### 3. Open Windows Firewall for ports 4000 and 8080
+
+```powershell
+New-NetFirewallRule -DisplayName "VexWorldsOperations 4000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4000
+New-NetFirewallRule -DisplayName "VexWorldsOperations 8080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
+```
+
+### 4. Allow inbound Hyper-V / WSL mirrored networking traffic
+
+```powershell
+Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -DefaultInboundAction Allow
+```
+
+### 5. Start WSL again
+
+```powershell
+wsl
+```
+
+### 6. Verify from inside WSL
+
+Run your app/deploy there, then from Windows or another LAN device hit:
+
+```text
+http://YOUR_WINDOWS_LAN_IP:4000
+http://YOUR_WINDOWS_LAN_IP:8080
+```
+
 ## Deploy Scripts
 
 ### Backend
