@@ -236,6 +236,37 @@ async function fetchRobotEventByCode(eventCode) {
   return event;
 }
 
+function normalizeRobotEventTeam(team) {
+  const teamNumber = String(
+    team?.number ??
+      team?.team?.number ??
+      team?.teamNumber ??
+      team?.team_number ??
+      "",
+  ).trim();
+
+  if (teamNumber === "") {
+    return null;
+  }
+
+  const teamName = String(
+    team?.team_name ??
+      team?.team?.team_name ??
+      team?.name ??
+      team?.team?.name ??
+      "",
+  ).trim();
+  const organization = String(
+    team?.organization ?? team?.team?.organization ?? "",
+  ).trim();
+
+  return {
+    number: teamNumber,
+    team_name: teamName === "" ? teamNumber : teamName,
+    organization: organization === "" ? null : organization,
+  };
+}
+
 async function fetchRobotEventTeams(eventId) {
   const teams = [];
   let currentPage = 1;
@@ -246,8 +277,16 @@ async function fetchRobotEventTeams(eventId) {
       `/events/${eventId}/teams?page=${currentPage}`,
     );
 
-    teams.push(...(payload?.data ?? []));
-    lastPage = payload?.meta?.last_page ?? currentPage;
+    teams.push(
+      ...(payload?.data ?? [])
+        .map(normalizeRobotEventTeam)
+        .filter(Boolean),
+    );
+    lastPage =
+      payload?.meta?.last_page ??
+      payload?.meta?.lastPage ??
+      payload?.meta?.pagination?.last_page ??
+      currentPage;
     currentPage += 1;
   } while (currentPage <= lastPage);
 
@@ -861,6 +900,14 @@ app.post("/api/events/import", async (req, res) => {
     const robotEvent = await fetchRobotEventByCode(eventCode);
     const eventRow = await upsertEvent(robotEvent);
     const robotTeams = await fetchRobotEventTeams(robotEvent.id);
+
+    if (robotTeams.length === 0) {
+      const error = new Error(
+        `RobotEvents returned zero teams for event ${eventCode}. The event was created, but no teams were imported.`,
+      );
+      error.statusCode = 502;
+      throw error;
+    }
 
     await upsertEventTeams(eventRow, robotTeams);
 
