@@ -7,7 +7,13 @@ import {
   useState,
 } from "react";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
-import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import {
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import SignaturePad from "signature_pad";
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "")
@@ -33,6 +39,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<AppScreen />} />
       <Route path="/events/:eventId" element={<AppScreen />} />
+      <Route path="/combined/:combinedId" element={<AppScreen />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -70,6 +77,63 @@ const triStateOptions = [
   { value: "true", label: "Yes" },
   { value: "false", label: "No" },
 ];
+const combinedDashboardsStorageKey = "worldscheckin-combined-dashboards";
+const combinedStatusPalettes = {
+  checkedIn: ["#047857", "#059669", "#10b981", "#34d399", "#6ee7b7"],
+  preCheckedOnly: ["#b45309", "#d97706", "#f59e0b", "#fbbf24", "#fcd34d"],
+  notPreChecked: ["#9f1239", "#be123c", "#e11d48", "#f43f5e", "#fb7185"],
+};
+
+function loadCombinedDashboards() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(combinedDashboardsStorageKey);
+
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    if (!Array.isArray(parsedValue)) {
+      return [];
+    }
+
+    return parsedValue
+      .map((dashboard) => ({
+        id: String(dashboard?.id ?? ""),
+        name: String(dashboard?.name ?? "").trim(),
+        eventIds: Array.isArray(dashboard?.eventIds)
+          ? dashboard.eventIds
+              .map((eventId) => Number(eventId))
+              .filter((eventId) => Number.isInteger(eventId))
+          : [],
+      }))
+      .filter(
+        (dashboard) => dashboard.id !== "" && dashboard.name !== "" && dashboard.eventIds.length > 0,
+      );
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveCombinedDashboards(dashboards) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    combinedDashboardsStorageKey,
+    JSON.stringify(dashboards),
+  );
+}
+
+function createCombinedDashboardId() {
+  return `combined-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function compareValues(a, b, direction) {
   if (typeof a === "boolean" && typeof b === "boolean") {
@@ -82,6 +146,40 @@ function compareValues(a, b, direction) {
 
   const left = String(a ?? "").toLowerCase();
   const right = String(b ?? "").toLowerCase();
+
+  return direction === "asc"
+    ? left.localeCompare(right)
+    : right.localeCompare(left);
+}
+
+function compareTeamNumbers(leftValue, rightValue, direction) {
+  const left = String(leftValue ?? "").trim();
+  const right = String(rightValue ?? "").trim();
+  const leftNumericMatch = left.match(/^(\d+)[A-Za-z]$/);
+  const rightNumericMatch = right.match(/^(\d+)[A-Za-z]$/);
+
+  if (leftNumericMatch && rightNumericMatch) {
+    const leftNumber = Number(leftNumericMatch[1]);
+    const rightNumber = Number(rightNumericMatch[1]);
+
+    if (leftNumber !== rightNumber) {
+      return direction === "asc"
+        ? leftNumber - rightNumber
+        : rightNumber - leftNumber;
+    }
+
+    return direction === "asc"
+      ? left.localeCompare(right)
+      : right.localeCompare(left);
+  }
+
+  if (leftNumericMatch && !rightNumericMatch) {
+    return direction === "asc" ? -1 : 1;
+  }
+
+  if (!leftNumericMatch && rightNumericMatch) {
+    return direction === "asc" ? 1 : -1;
+  }
 
   return direction === "asc"
     ? left.localeCompare(right)
@@ -121,7 +219,9 @@ function formatPhoneDisplay(value) {
 }
 
 function normalizeSearchText(value) {
-  return String(value ?? "").toLowerCase().trim();
+  return String(value ?? "")
+    .toLowerCase()
+    .trim();
 }
 
 function normalizeSearchDigits(value) {
@@ -198,7 +298,10 @@ function buildTeamsCsv(teams) {
     headers.map((header) => toCsvCell(team[header])),
   );
 
-  return [headers.map(toCsvCell).join(","), ...rows.map((row) => row.join(","))].join("\n");
+  return [
+    headers.map(toCsvCell).join(","),
+    ...rows.map((row) => row.join(",")),
+  ].join("\n");
 }
 
 function trimCanvasElement(sourceCanvas) {
@@ -373,7 +476,7 @@ function DetailCard({ label, value, copyKey, copiedField, onCopy }) {
         {label}
       </p>
       <div className="mt-2 flex items-start justify-between gap-2">
-        <p className="break-words text-sm font-medium text-slate-800">
+        <p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
           {value}
         </p>
         <button
@@ -399,6 +502,48 @@ function SimpleField({ label, value }) {
   );
 }
 
+function TeamProgressField({ preCheckedIn, checkedIn, className = "" }) {
+  const progress = checkedIn ? 100 : preCheckedIn ? 50 : 0;
+  const progressLabel = checkedIn
+    ? "Fully checked in"
+    : preCheckedIn
+      ? "Pre-checked in"
+      : "Not started";
+
+  return (
+    <article
+      className={`rounded-xl border border-slate-200 bg-white px-3 py-2.5 sm:col-span-2 lg:col-span-2 ${className}`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[0.68rem] font-bold uppercase tracking-[0.16em] text-slate-500">
+          Check-In Progress
+        </p>
+        <p className="text-xs font-semibold text-slate-500">{progress}%</p>
+      </div>
+      <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-200">
+        <div
+          className={`h-full rounded-full transition-all ${
+            checkedIn
+              ? "bg-emerald-500"
+              : preCheckedIn
+                ? "bg-amber-400"
+                : "bg-slate-300"
+          }`}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-3 text-xs font-semibold">
+        <span className={preCheckedIn ? "text-amber-700" : "text-slate-400"}>
+          Pre-checked
+        </span>
+        <span className={checkedIn ? "text-emerald-700" : "text-slate-400"}>
+          Fully checked
+        </span>
+      </div>
+    </article>
+  );
+}
+
 function CopyableSimpleField({ label, value, copyKey, copiedField, onCopy }) {
   return (
     <article className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
@@ -406,7 +551,7 @@ function CopyableSimpleField({ label, value, copyKey, copiedField, onCopy }) {
         {label}
       </p>
       <div className="mt-1 flex items-start justify-between gap-2">
-        <p className="break-words text-sm font-semibold text-slate-900">
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
           {value}
         </p>
         <button
@@ -496,18 +641,113 @@ function StyledSelect({ value, onChange, children, className = "" }) {
   );
 }
 
+function BreakdownTooltip({ items, align = "left" }) {
+  if (!items || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className={`pointer-events-none absolute top-full z-20 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-[0_18px_50px_rgba(15,23,42,0.18)] opacity-0 transition duration-150 group-hover:opacity-100 ${
+        align === "right" ? "right-0" : "left-0"
+      }`}
+    >
+      <p className="text-[0.68rem] font-bold uppercase tracking-[0.16em] text-slate-500">
+        Event Breakdown
+      </p>
+      <div className="mt-2 grid gap-2">
+        {items.map((item) => (
+          <div
+            key={item.key}
+            className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2"
+          >
+            <span className="truncate text-sm font-semibold text-slate-700">
+              {item.label}
+            </span>
+            <span className="text-sm font-black text-slate-950">
+              {item.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CombinedMetricCard({
+  title,
+  value,
+  preview,
+  tooltipItems,
+  className = "",
+}) {
+  return (
+    <article className={`group relative rounded-2xl px-5 py-4 text-white ${className}`}>
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/70">
+        {title}
+      </p>
+      <strong className="mt-3 block text-3xl font-black">{value}</strong>
+      <p className="mt-2 truncate text-sm font-semibold text-white/75">
+        {preview}
+      </p>
+      <BreakdownTooltip items={tooltipItems} />
+    </article>
+  );
+}
+
+function CombinedLegendRow({
+  color,
+  label,
+  value,
+  tooltipItems,
+}) {
+  return (
+    <div className="group relative flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
+        <span className="font-semibold text-slate-700">{label}</span>
+      </div>
+      <span className="font-bold text-slate-950">{value}</span>
+      <BreakdownTooltip items={tooltipItems} align="right" />
+    </div>
+  );
+}
+
+function CombinedTotalRow({ label, value, tooltipItems }) {
+  return (
+    <div className="group relative flex items-baseline justify-between gap-4 rounded-xl bg-slate-50 px-3 py-2">
+      <p className="text-sm font-semibold text-slate-700">{label}</p>
+      <p className="text-xl font-black text-slate-950">{value}</p>
+      <BreakdownTooltip items={tooltipItems} align="right" />
+    </div>
+  );
+}
+
 function AppScreen() {
   const navigate = useNavigate();
-  const { eventId: eventIdParam } = useParams();
+  const { eventId: eventIdParam, combinedId: combinedIdParam } = useParams();
   const [events, setEvents] = useState([]);
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState("");
   const [eventCodeInput, setEventCodeInput] = useState("");
   const [eventImportError, setEventImportError] = useState("");
   const [isImportingEvent, setIsImportingEvent] = useState(false);
+  const [combinedDashboards, setCombinedDashboards] = useState(() =>
+    loadCombinedDashboards(),
+  );
+  const [isCombinedModalOpen, setIsCombinedModalOpen] = useState(false);
+  const [combinedDashboardNameInput, setCombinedDashboardNameInput] =
+    useState("");
+  const [combinedDashboardEventIds, setCombinedDashboardEventIds] = useState(
+    [],
+  );
+  const [combinedDashboardError, setCombinedDashboardError] = useState("");
   const [teams, setTeams] = useState([]);
   const [isLoadingTeams, setIsLoadingTeams] = useState(true);
   const [teamsError, setTeamsError] = useState("");
+  const [combinedTeamsByEventId, setCombinedTeamsByEventId] = useState({});
+  const [isLoadingCombinedTeams, setIsLoadingCombinedTeams] = useState(false);
+  const [combinedTeamsError, setCombinedTeamsError] = useState("");
   const [statusFilters, setStatusFilters] = useState({
     preChecked: "any",
     checkedIn: "false",
@@ -544,20 +784,72 @@ function AppScreen() {
   const checkedInPanelTouchStartXRef = useRef(null);
   const selectedEventId =
     eventIdParam && /^\d+$/.test(eventIdParam) ? Number(eventIdParam) : null;
+  const selectedCombinedId =
+    typeof combinedIdParam === "string" && combinedIdParam.trim() !== ""
+      ? combinedIdParam
+      : null;
+  const selectedCombinedDashboard =
+    selectedCombinedId === null
+      ? null
+      : combinedDashboards.find((dashboard) => dashboard.id === selectedCombinedId) ??
+        null;
+  const isCombinedView = selectedCombinedDashboard !== null;
 
+  const selectedTeam =
+    selectedTeamId === null
+      ? null
+      : (
+          [
+            ...teams,
+            ...Object.values(combinedTeamsByEventId).flat(),
+          ].find((team) => team.id === selectedTeamId) ?? null
+        );
+  const selectedEvent =
+    selectedEventId === null
+      ? null
+      : (events.find((event) => event.id === selectedEventId) ?? null);
+  const combinedEventEntries = useMemo(
+    () =>
+      selectedCombinedDashboard
+        ? selectedCombinedDashboard.eventIds
+            .map((eventId) => events.find((event) => event.id === eventId))
+            .filter(Boolean)
+        : [],
+    [events, selectedCombinedDashboard],
+  );
+  const activeTeams = useMemo(() => {
+    if (!isCombinedView) {
+      return teams;
+    }
+
+    return combinedEventEntries.flatMap((event) =>
+      (combinedTeamsByEventId[event.id] ?? []).map((team) => ({
+        ...team,
+        eventCode: event.eventCode,
+        eventName: event.name,
+        eventId: event.id,
+      })),
+    );
+  }, [combinedEventEntries, combinedTeamsByEventId, isCombinedView, teams]);
   const filteredTeams = useMemo(() => {
     const normalizedSearchTerm = normalizeSearchText(searchTerm);
     const normalizedDigitSearch = normalizeSearchDigits(searchTerm);
 
-    return teams.filter((team) => {
-        const matchesPreChecked =
-          statusFilters.preChecked === "any" ||
-          String(team.preCheckedIn) === statusFilters.preChecked;
-        const matchesCheckedIn =
-          statusFilters.checkedIn === "any" ||
-          String(team.checkedIn) === statusFilters.checkedIn;
-        const matchesSearch =
-          normalizedSearchTerm === "" ||
+    return activeTeams.filter((team) => {
+      const matchesPreChecked =
+        statusFilters.preChecked === "any" ||
+        String(team.preCheckedIn) === statusFilters.preChecked;
+      const matchesCheckedIn =
+        statusFilters.checkedIn === "any" ||
+        String(team.checkedIn) === statusFilters.checkedIn;
+      const matchesSearch = isCombinedView
+        ? normalizedSearchTerm === "" ||
+          normalizeSearchText(team.teamNumber).includes(normalizedSearchTerm) ||
+          (normalizedDigitSearch !== "" &&
+            normalizeSearchDigits(team.teamNumber).includes(
+              normalizedDigitSearch,
+            ))
+        : normalizedSearchTerm === "" ||
           [
             team.teamNumber,
             team.teamName,
@@ -568,27 +860,39 @@ function AppScreen() {
             normalizeSearchText(value).includes(normalizedSearchTerm),
           ) ||
           (normalizedDigitSearch !== "" &&
-            [
-              team.teamNumber,
-              team.contactNumber,
-            ].some((value) =>
+            [team.teamNumber, team.contactNumber].some((value) =>
               normalizeSearchDigits(value).includes(normalizedDigitSearch),
             ));
 
-        return matchesPreChecked && matchesCheckedIn && matchesSearch;
-      });
-  }, [searchTerm, statusFilters, teams]);
+      return matchesPreChecked && matchesCheckedIn && matchesSearch;
+    });
+  }, [activeTeams, isCombinedView, searchTerm, statusFilters]);
 
   const sortedTeams = useMemo(
     () =>
-      [...filteredTeams].sort((left, right) =>
-        compareValues(
+      [...filteredTeams].sort((left, right) => {
+        if (sortConfig.key === "teamNumber") {
+          return compareTeamNumbers(
+            left.teamNumber,
+            right.teamNumber,
+            sortConfig.direction,
+          );
+        }
+
+        return compareValues(
           left[sortConfig.key],
           right[sortConfig.key],
           sortConfig.direction,
-        ),
-      ),
+        );
+      }),
     [filteredTeams, sortConfig],
+  );
+  const currentColumns = useMemo(
+    () =>
+      isCombinedView
+        ? [{ key: "eventCode", label: "Event" }, ...columns]
+        : columns,
+    [isCombinedView],
   );
 
   const effectivePageSize =
@@ -607,14 +911,18 @@ function AppScreen() {
     pageSize === "all"
       ? [1]
       : getVisiblePageNumbers(safeCurrentPage, totalPages);
-  const selectedTeam =
-    selectedTeamId === null
-      ? null
-      : (teams.find((team) => team.id === selectedTeamId) ?? null);
-  const selectedEvent =
-    selectedEventId === null
-      ? null
-      : (events.find((event) => event.id === selectedEventId) ?? null);
+  const selectedTeamWristbandsSummary =
+    selectedTeam === null
+      ? ""
+      : selectedTeam.checkedIn && selectedTeam.wristbandsActual !== null
+        ? String(selectedTeam.wristbandsActual)
+        : selectedTeam.preCheckedIn
+          ? `${selectedTeam.wristbandsEstimated} (est)`
+          : "";
+  const selectedTeamParkingSummary =
+    selectedTeam === null || !selectedTeam.checkedIn
+      ? ""
+      : getStatusLabel(selectedTeam.parkingPass);
 
   async function fetchEvents({ showLoading = true } = {}) {
     if (showLoading) {
@@ -628,7 +936,9 @@ function AppScreen() {
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload.error || payload.details || "Failed to load events.");
+        throw new Error(
+          payload.error || payload.details || "Failed to load events.",
+        );
       }
 
       const normalizedEvents = payload.map(normalizeEvent);
@@ -658,11 +968,15 @@ function AppScreen() {
     setTeamsError("");
 
     try {
-      const response = await fetch(createApiUrl(`/api/events/${eventId}/teams`));
+      const response = await fetch(
+        createApiUrl(`/api/events/${eventId}/teams`),
+      );
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload.error || payload.details || "Failed to load teams.");
+        throw new Error(
+          payload.error || payload.details || "Failed to load teams.",
+        );
       }
 
       setTeams(payload.map(normalizeTeam));
@@ -676,57 +990,256 @@ function AppScreen() {
     }
   }
 
-  const totalTeams = teams.length;
-  const preCheckedCount = teams.filter((team) => team.preCheckedIn).length;
-  const fullyCheckedCount = teams.filter((team) => team.checkedIn).length;
+  const totalTeams = activeTeams.length;
+  const preCheckedCount = activeTeams.filter((team) => team.preCheckedIn).length;
+  const fullyCheckedCount = activeTeams.filter((team) => team.checkedIn).length;
   const preCheckedOnlyCount = preCheckedCount - fullyCheckedCount;
   const notPreCheckedCount = totalTeams - preCheckedCount;
+  const estimatedWristbandsTotal = activeTeams.reduce(
+    (total, team) => total + Number(team.wristbandsEstimated ?? 0),
+    0,
+  );
+  const actualWristbandsDistributedTotal = activeTeams.reduce(
+    (total, team) =>
+      total + (team.checkedIn ? Number(team.wristbandsActual ?? 0) : 0),
+    0,
+  );
+  const parkingPassesDistributedTotal = activeTeams.reduce(
+    (total, team) => total + (team.checkedIn && team.parkingPass ? 1 : 0),
+    0,
+  );
+  const combinedBreakdowns = useMemo(() => {
+    if (!isCombinedView) {
+      return null;
+    }
+
+    return combinedEventEntries.map((event) => {
+      const eventTeams = combinedTeamsByEventId[event.id] ?? [];
+      const eventPreChecked = eventTeams.filter((team) => team.preCheckedIn).length;
+      const eventFullyChecked = eventTeams.filter((team) => team.checkedIn).length;
+      const eventPreOnly = eventPreChecked - eventFullyChecked;
+      const eventPending = eventTeams.length - eventPreChecked;
+
+      return {
+        eventId: event.id,
+        eventCode: event.eventCode,
+        totalTeams: eventTeams.length,
+        preChecked: eventPreChecked,
+        fullyChecked: eventFullyChecked,
+        preCheckedOnly: eventPreOnly,
+        notPreChecked: eventPending,
+        estimatedWristbands: eventTeams.reduce(
+          (total, team) => total + Number(team.wristbandsEstimated ?? 0),
+          0,
+        ),
+        actualWristbands: eventTeams.reduce(
+          (total, team) =>
+            total + (team.checkedIn ? Number(team.wristbandsActual ?? 0) : 0),
+          0,
+        ),
+        parkingPasses: eventTeams.reduce(
+          (total, team) => total + (team.checkedIn && team.parkingPass ? 1 : 0),
+          0,
+        ),
+      };
+    });
+  }, [combinedEventEntries, combinedTeamsByEventId, isCombinedView]);
+  const combinedMetricCards = useMemo(() => {
+    if (!combinedBreakdowns) {
+      return null;
+    }
+
+    return [
+      {
+        title: "Total Teams",
+        value: totalTeams,
+        preview: combinedBreakdowns.map((item) => item.totalTeams).join(" / "),
+        tooltipItems: combinedBreakdowns.map((item) => ({
+          key: `teams-${item.eventId}`,
+          label: item.eventCode,
+          value: item.totalTeams,
+        })),
+        className: "bg-slate-950",
+      },
+      {
+        title: "Pre-Checked",
+        value: preCheckedCount,
+        preview: combinedBreakdowns.map((item) => item.preChecked).join(" / "),
+        tooltipItems: combinedBreakdowns.map((item) => ({
+          key: `pre-${item.eventId}`,
+          label: item.eventCode,
+          value: item.preChecked,
+        })),
+        className: "bg-amber-500",
+      },
+      {
+        title: "Fully Checked",
+        value: fullyCheckedCount,
+        preview: combinedBreakdowns.map((item) => item.fullyChecked).join(" / "),
+        tooltipItems: combinedBreakdowns.map((item) => ({
+          key: `full-${item.eventId}`,
+          label: item.eventCode,
+          value: item.fullyChecked,
+        })),
+        className: "bg-emerald-600",
+      },
+    ];
+  }, [combinedBreakdowns, fullyCheckedCount, preCheckedCount, totalTeams]);
 
   const chartTotal = totalTeams || 1;
-  const pieStyle = {
-    background: `conic-gradient(
-      #0f172a 0deg ${(fullyCheckedCount / chartTotal) * 360}deg,
-      #475569 ${(fullyCheckedCount / chartTotal) * 360}deg ${
-        ((fullyCheckedCount + preCheckedOnlyCount) / chartTotal) * 360
-      }deg,
-      #cbd5e1 ${((fullyCheckedCount + preCheckedOnlyCount) / chartTotal) * 360}deg 360deg
-    )`,
-  };
+  const pieStyle = useMemo(() => {
+    if (!isCombinedView || !combinedBreakdowns || totalTeams === 0) {
+      return {
+        background: `conic-gradient(
+          #0f172a 0deg ${(fullyCheckedCount / chartTotal) * 360}deg,
+          #475569 ${(fullyCheckedCount / chartTotal) * 360}deg ${
+            ((fullyCheckedCount + preCheckedOnlyCount) / chartTotal) * 360
+          }deg,
+          #cbd5e1 ${((fullyCheckedCount + preCheckedOnlyCount) / chartTotal) * 360}deg 360deg
+        )`,
+      };
+    }
+
+    const segments = [];
+    const pushSegments = (statusKey, valueKey) => {
+      const palette = combinedStatusPalettes[statusKey];
+      combinedBreakdowns.forEach((item, index) => {
+        const value = item[valueKey];
+        if (value > 0) {
+          segments.push({
+            color: palette[index % palette.length],
+            value,
+          });
+        }
+      });
+    };
+
+    pushSegments("checkedIn", "fullyChecked");
+    pushSegments("preCheckedOnly", "preCheckedOnly");
+    pushSegments("notPreChecked", "notPreChecked");
+
+    if (segments.length === 0) {
+      return { background: "#e2e8f0" };
+    }
+
+    let currentDegrees = 0;
+    const gradientParts = segments.map((segment) => {
+      const nextDegrees = currentDegrees + (segment.value / totalTeams) * 360;
+      const part = `${segment.color} ${currentDegrees}deg ${nextDegrees}deg`;
+      currentDegrees = nextDegrees;
+      return part;
+    });
+
+    return {
+      background: `conic-gradient(${gradientParts.join(", ")})`,
+    };
+  }, [
+    chartTotal,
+    combinedBreakdowns,
+    fullyCheckedCount,
+    isCombinedView,
+    preCheckedOnlyCount,
+    totalTeams,
+  ]);
 
   useEffect(() => {
     fetchEvents({ showLoading: true }).catch(() => {});
-
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    saveCombinedDashboards(combinedDashboards);
+  }, [combinedDashboards]);
 
+  useEffect(() => {
     fetchTeamsForEvent(selectedEventId, { showLoading: true }).catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
   }, [selectedEventId]);
 
   useEffect(() => {
-    if (selectedEventId === null) {
+    if (!isCombinedView) {
+      setCombinedTeamsByEventId({});
+      setCombinedTeamsError("");
+      setIsLoadingCombinedTeams(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchCombinedTeams = async ({ showLoading = true } = {}) => {
+      if (showLoading) {
+        setIsLoadingCombinedTeams(true);
+      }
+
+      setCombinedTeamsError("");
+
+      try {
+        const entries = await Promise.all(
+          selectedCombinedDashboard.eventIds.map(async (eventId) => {
+            const response = await fetch(
+              createApiUrl(`/api/events/${eventId}/teams`),
+            );
+            const payload = await response.json();
+
+            if (!response.ok) {
+              throw new Error(
+                payload.error || payload.details || "Failed to load combined teams.",
+              );
+            }
+
+            return [eventId, payload.map(normalizeTeam)];
+          }),
+        );
+
+        if (!isCancelled) {
+          setCombinedTeamsByEventId(Object.fromEntries(entries));
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setCombinedTeamsByEventId({});
+          setCombinedTeamsError(
+            error.message || "Failed to load combined teams.",
+          );
+        }
+      } finally {
+        if (!isCancelled && showLoading) {
+          setIsLoadingCombinedTeams(false);
+        }
+      }
+    };
+
+    fetchCombinedTeams({ showLoading: true }).catch(() => {});
+
+    const intervalId = window.setInterval(() => {
+      fetchEvents({ showLoading: false }).catch(() => {});
+      fetchCombinedTeams({ showLoading: false }).catch(() => {});
+    }, 30 * 1000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [isCombinedView, selectedCombinedDashboard]);
+
+  useEffect(() => {
+    if (selectedEventId === null || isCombinedView) {
       return undefined;
     }
 
     const intervalId = window.setInterval(() => {
       fetchEvents({ showLoading: false }).catch(() => {});
-      fetchTeamsForEvent(selectedEventId, { showLoading: false }).catch(() => {});
+      fetchTeamsForEvent(selectedEventId, { showLoading: false }).catch(
+        () => {},
+      );
     }, 30 * 1000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [selectedEventId]);
+  }, [isCombinedView, selectedEventId]);
 
   useEffect(() => {
     setSelectedTeamId(null);
     setCurrentPage(1);
-  }, [selectedEventId]);
+  }, [selectedCombinedId, selectedEventId]);
 
   useEffect(() => {
     if (!selectedTeam) {
@@ -782,6 +1295,24 @@ function AppScreen() {
     }
   }, [selectedTeam?.id]);
 
+  useEffect(() => {
+    if (!isCombinedModalOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeCombinedDashboardModal();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isCombinedModalOpen]);
+
   function handleSort(columnKey) {
     setCurrentPage(1);
     setSortConfig((current) => ({
@@ -814,15 +1345,17 @@ function AppScreen() {
   }
 
   function handleExportCsv() {
-    const csvContent = buildTeamsCsv(teams);
+    const csvContent = buildTeamsCsv(activeTeams);
     const csvBlob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const downloadUrl = URL.createObjectURL(csvBlob);
     const downloadLink = document.createElement("a");
 
     downloadLink.href = downloadUrl;
-    downloadLink.download = selectedEvent
-      ? `${selectedEvent.eventCode || "event"}-teams.csv`
-      : "worlds-check-in-teams.csv";
+    downloadLink.download = isCombinedView
+      ? `${selectedCombinedDashboard.name || "combined"}-teams.csv`
+      : selectedEvent
+        ? `${selectedEvent.eventCode || "event"}-teams.csv`
+        : "worlds-check-in-teams.csv";
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
@@ -855,7 +1388,9 @@ function AppScreen() {
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload.details || payload.error || "Failed to import event.");
+        throw new Error(
+          payload.details || payload.error || "Failed to import event.",
+        );
       }
 
       const importedEvent = normalizeEvent(payload.event);
@@ -880,7 +1415,176 @@ function AppScreen() {
     }
   }
 
+  function openCombinedDashboardModal() {
+    setCombinedDashboardNameInput("");
+    setCombinedDashboardEventIds([]);
+    setCombinedDashboardError("");
+    setIsCombinedModalOpen(true);
+  }
+
+  function closeCombinedDashboardModal() {
+    setIsCombinedModalOpen(false);
+    setCombinedDashboardError("");
+  }
+
+  function handleCombinedEventToggle(eventId) {
+    setCombinedDashboardEventIds((current) =>
+      current.includes(eventId)
+        ? current.filter((currentEventId) => currentEventId !== eventId)
+        : [...current, eventId],
+    );
+  }
+
+  function handleCreateCombinedDashboard(event) {
+    event.preventDefault();
+
+    const trimmedName = combinedDashboardNameInput.trim();
+
+    if (trimmedName === "") {
+      setCombinedDashboardError("Enter a name for this combined dashboard.");
+      return;
+    }
+
+    if (combinedDashboardEventIds.length === 0) {
+      setCombinedDashboardError("Select at least one imported event.");
+      return;
+    }
+
+    const nextDashboard = {
+      id: createCombinedDashboardId(),
+      name: trimmedName,
+      eventIds: [...combinedDashboardEventIds].sort((left, right) => left - right),
+    };
+
+    setCombinedDashboards((current) => [...current, nextDashboard]);
+    closeCombinedDashboardModal();
+    navigate(`/combined/${nextDashboard.id}`);
+  }
+
+  function handleRemoveCombinedDashboard(event, dashboardId) {
+    event.stopPropagation();
+    event.preventDefault();
+
+    setCombinedDashboards((current) =>
+      current.filter((dashboard) => dashboard.id !== dashboardId),
+    );
+
+    if (selectedCombinedId === dashboardId) {
+      navigate("/");
+    }
+  }
+
+  const combinedDashboardModal = isCombinedModalOpen ? (
+    <div
+      className="fixed inset-0 z-40 grid place-items-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm"
+      onClick={closeCombinedDashboardModal}
+    >
+      <section
+        className="w-full max-w-3xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_30px_120px_rgba(15,23,42,0.25)]"
+        onClick={(event) => event.stopPropagation()}
+        aria-modal="true"
+        role="dialog"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+              Combined Dashboard
+            </p>
+            <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+              Create a combined team check-in dashboard
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+              Choose imported events to combine into one saved dashboard. This stays stored in this browser.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+            onClick={closeCombinedDashboardModal}
+          >
+            Close
+          </button>
+        </div>
+
+        <form className="mt-5" onSubmit={handleCreateCombinedDashboard}>
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-slate-700">
+              Dashboard name
+            </span>
+            <input
+              type="text"
+              value={combinedDashboardNameInput}
+              onChange={(event) => setCombinedDashboardNameInput(event.target.value)}
+              className="h-12 rounded-2xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+              placeholder="Worlds Combined Dashboard"
+            />
+          </label>
+
+          <div className="mt-5">
+            <p className="text-sm font-semibold text-slate-700">
+              Select imported events
+            </p>
+            {events.length === 0 ? (
+              <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm font-medium text-slate-500">
+                Import events first, then create a combined dashboard.
+              </div>
+            ) : (
+              <div className="mt-3 grid max-h-[45dvh] gap-3 overflow-y-auto pr-1">
+                {events.map((event) => {
+                  const isSelected = combinedDashboardEventIds.includes(event.id);
+
+                  return (
+                    <button
+                      key={event.id}
+                      type="button"
+                      className={`rounded-[22px] border px-4 py-4 text-left transition ${
+                        isSelected
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-slate-100"
+                      }`}
+                      onClick={() => handleCombinedEventToggle(event.id)}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-xs font-bold uppercase tracking-[0.18em] ${isSelected ? "text-white/70" : "text-slate-500"}`}>
+                            {event.eventCode}
+                          </p>
+                          <h3 className="mt-2 truncate text-lg font-black">
+                            {event.name}
+                          </h3>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${isSelected ? "bg-white text-slate-900" : "bg-slate-200 text-slate-700"}`}>
+                          {isSelected ? "Selected" : "Select"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <p className={`mt-4 min-h-5 text-sm font-semibold ${combinedDashboardError ? "text-red-600" : "text-slate-500"}`}>
+            {combinedDashboardError || `${combinedDashboardEventIds.length} events selected`}
+          </p>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="submit"
+              className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Save Combined Dashboard
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  ) : null;
+
   function closeTeamModal() {
+    const shouldResetSearch =
+      checkInStep === "result" && pickupResult === "success";
+
     setSelectedTeamId(null);
     setSignatureNotice("");
     setSignatureNoticeTone("info");
@@ -889,10 +1593,16 @@ function AppScreen() {
     setPickupResult(null);
     setPickupResultMessage("");
     signaturePadRef.current?.clear();
+
+    if (shouldResetSearch) {
+      setSearchTerm("");
+      setCurrentPage(1);
+    }
   }
 
   function handleCheckedInPanelTouchStart(event) {
-    checkedInPanelTouchStartXRef.current = event.changedTouches[0]?.clientX ?? null;
+    checkedInPanelTouchStartXRef.current =
+      event.changedTouches[0]?.clientX ?? null;
   }
 
   function handleCheckedInPanelTouchEnd(event) {
@@ -977,8 +1687,10 @@ function AppScreen() {
       return;
     }
 
-    if (actualWristbands > 10) {
-      setWristbandsError("Actual wristbands cannot be over 10.");
+    if (actualWristbands > 13) {
+      setWristbandsError(
+        "If more than 13 wristbands are needed, pick up extras at spectator check-in.",
+      );
       return;
     }
 
@@ -1103,100 +1815,181 @@ function AppScreen() {
     return (
       <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-4xl rounded-[28px] border border-slate-200 bg-white p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-          <p className="text-sm font-semibold text-slate-600">Loading events...</p>
+          <p className="text-sm font-semibold text-slate-600">
+            Loading events...
+          </p>
         </div>
       </main>
     );
   }
 
-  if (!selectedEvent) {
+  if (!selectedEvent && !selectedCombinedDashboard) {
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-5xl flex-col gap-5">
-          {eventsError ? (
-            <section className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700">
-              {eventsError}
-            </section>
-          ) : null}
+      <>
+        <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-5xl flex-col gap-5">
+            {eventsError ? (
+              <section className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700">
+                {eventsError}
+              </section>
+            ) : null}
 
-          <section className="grid gap-5 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] lg:grid-cols-[1.1fr_0.9fr]">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                Event Check-In
-              </p>
-              <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
-                Choose an imported event or add a new event code
-              </h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-                Import a RobotEvents event by code through the backend, then open that event’s dashboard to run check-in just for that event.
-              </p>
-            </div>
-
-            <form
-              className="rounded-[24px] border border-slate-200 bg-slate-50 p-5"
-              onSubmit={handleImportEvent}
-            >
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                Import Event
-              </p>
-              <label className="mt-4 grid gap-2">
-                <span className="text-sm font-semibold text-slate-700">
-                  Event code
-                </span>
-                <input
-                  type="text"
-                  value={eventCodeInput}
-                  onChange={(event) => setEventCodeInput(event.target.value.toUpperCase())}
-                  className="h-12 rounded-2xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-                  placeholder="RE-V5RC-26-4025"
-                />
-              </label>
-              <p
-                className={`mt-3 min-h-5 text-sm font-semibold ${
-                  eventImportError ? "text-red-600" : "text-slate-500"
-                }`}
-              >
-                {eventImportError || "Imports event info and all registered teams."}
-              </p>
-              <button
-                type="submit"
-                className="mt-4 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={isImportingEvent}
-              >
-                {isImportingEvent ? "Importing..." : "Import Event"}
-              </button>
-            </form>
-          </section>
-
-          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-            <div className="flex items-center justify-between gap-4">
+            <section className="grid gap-5 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] lg:grid-cols-[1.1fr_0.9fr]">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Imported Events
+                  Event Check-In
                 </p>
-                <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-                  Open an event dashboard
-                </h2>
+                <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
+                  Choose an imported event or add a new event code
+                </h1>
+                <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
+                  Import a RobotEvents event by code through the backend, then
+                  open that event’s dashboard to run check-in just for that event.
+                </p>
               </div>
-              <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
-                {events.length} imported
-              </span>
-            </div>
 
-                {events.length === 0 ? (
-              <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm font-medium text-slate-500">
-                No events imported yet.
+              <form
+                className="rounded-[24px] border border-slate-200 bg-slate-50 p-5"
+                onSubmit={handleImportEvent}
+              >
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                  Import Event
+                </p>
+                <label className="mt-4 grid gap-2">
+                  <span className="text-sm font-semibold text-slate-700">
+                    Event code
+                  </span>
+                  <input
+                    type="text"
+                    value={eventCodeInput}
+                    onChange={(event) =>
+                      setEventCodeInput(event.target.value.toUpperCase())
+                    }
+                    className="h-12 rounded-2xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                    placeholder="RE-V5RC-26-4025"
+                  />
+                </label>
+                <p
+                  className={`mt-3 min-h-5 text-sm font-semibold ${
+                    eventImportError ? "text-red-600" : "text-slate-500"
+                  }`}
+                >
+                  {eventImportError ||
+                    "Imports event info and all registered teams."}
+                </p>
+                <button
+                  type="submit"
+                  className="mt-4 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  disabled={isImportingEvent}
+                >
+                  {isImportingEvent ? "Importing..." : "Import Event"}
+                </button>
+                <button
+                  type="button"
+                  className="mt-4 ml-3 rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-100"
+                  onClick={openCombinedDashboardModal}
+                >
+                  Create Combined Dashboard
+                </button>
+              </form>
+            </section>
+
+            <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Combined Dashboards
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                    Open a saved combined dashboard
+                  </h2>
+                </div>
+                <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+                  {combinedDashboards.length} saved
+                </span>
               </div>
-            ) : (
-              <div className="mt-5 grid gap-3">
-                {events.map((event) => (
-                  <button
-                    key={event.id}
-                    type="button"
-                    className="rounded-[24px] border border-slate-200 bg-slate-50 px-5 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100"
-                    onClick={() => navigate(`/events/${event.id}`)}
-                  >
-                    <div className="flex items-center justify-between gap-3">
+
+              {combinedDashboards.length === 0 ? (
+                <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm font-medium text-slate-500">
+                  No combined dashboards saved yet.
+                </div>
+              ) : (
+                <div className="mt-5 grid gap-3">
+                  {combinedDashboards.map((dashboard) => {
+                    const dashboardEvents = dashboard.eventIds
+                      .map((eventId) => events.find((event) => event.id === eventId))
+                      .filter(Boolean);
+
+                    return (
+                    <button
+                      key={dashboard.id}
+                      type="button"
+                      className="rounded-[24px] border border-slate-200 bg-slate-50 px-5 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100"
+                      onClick={() => navigate(`/combined/${dashboard.id}`)}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                              Combined
+                            </p>
+                            <h3 className="mt-2 truncate text-lg font-black text-slate-950">
+                              {dashboard.name}
+                            </h3>
+                            <p className="mt-2 truncate text-sm font-medium text-slate-600">
+                              {dashboardEvents.map((event) => event.eventCode).join(" • ")}
+                            </p>
+                          </div>
+                          <div className="shrink-0 text-right text-sm text-slate-600">
+                            <p className="font-semibold text-slate-800">
+                              {dashboard.eventIds.length} events
+                            </p>
+                            <button
+                              type="button"
+                              className="mt-3 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition hover:border-red-300 hover:bg-red-100"
+                              onClick={(event) =>
+                                handleRemoveCombinedDashboard(event, dashboard.id)
+                              }
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Imported Events
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                    Open an event dashboard
+                  </h2>
+                </div>
+                <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+                  {events.length} imported
+                </span>
+              </div>
+
+              {events.length === 0 ? (
+                <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm font-medium text-slate-500">
+                  No events imported yet.
+                </div>
+              ) : (
+                <div className="mt-5 grid gap-3">
+                  {events.map((event) => (
+                    <button
+                      key={event.id}
+                      type="button"
+                      className="rounded-[24px] border border-slate-200 bg-slate-50 px-5 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100"
+                      onClick={() => navigate(`/events/${event.id}`)}
+                    >
+                      <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
@@ -1207,7 +2000,11 @@ function AppScreen() {
                             {event.name}
                           </h3>
                           <p className="mt-2 truncate text-sm font-medium text-slate-600">
-                            {[event.locationCity, event.locationRegion, event.locationCountry]
+                            {[
+                              event.locationCity,
+                              event.locationRegion,
+                              event.locationCountry,
+                            ]
                               .filter(Boolean)
                               .join(", ")}
                           </p>
@@ -1216,22 +2013,29 @@ function AppScreen() {
                           <p className="font-semibold text-slate-800">
                             {formatEventDateRange(event.startAt, event.endAt)}
                           </p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      </main>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </main>
+        {combinedDashboardModal}
+      </>
     );
   }
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
-        {teamsError ? (
+        {isCombinedView && combinedTeamsError ? (
+          <section className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700">
+            {combinedTeamsError}
+          </section>
+        ) : null}
+        {!isCombinedView && teamsError ? (
           <section className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700">
             {teamsError}
           </section>
@@ -1240,59 +2044,109 @@ function AppScreen() {
         <section className="grid gap-5 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.08)] lg:grid-cols-[1.5fr_1fr]">
           <div className="flex flex-col justify-between gap-6">
             <div>
-              <img
-                src="/recf_logo.png"
-                alt="Dashboard logo"
-                className="mb-4 h-14 w-auto object-contain sm:h-16"
-              />
+              <div className="mb-4 flex items-center gap-3">
+                <img
+                  src="/recf_logo.png"
+                  alt="Dashboard logo"
+                  className="h-14 w-auto object-contain sm:h-16"
+                />
+                {!isCombinedView ? (
+                  <button
+                    type="button"
+                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                    onClick={openCombinedDashboardModal}
+                  >
+                    Combined
+                  </button>
+                ) : null}
+              </div>
               <h1 className="text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
-                Team check-in dashboard
+                {isCombinedView
+                  ? "Combined team check-in dashboard"
+                  : "Team check-in dashboard"}
               </h1>
               <div className="mt-4 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-base font-semibold text-slate-700">
-                    {selectedEvent.name}
+                    {isCombinedView
+                      ? selectedCombinedDashboard.name
+                      : selectedEvent.name}
                   </p>
                 </div>
-                <p className="text-sm font-semibold text-slate-600">
-                  {selectedEvent.eventCode}
-                </p>
-                <p className="text-sm text-slate-500">
-                  {[selectedEvent.locationVenue, selectedEvent.locationCity, selectedEvent.locationRegion]
-                    .filter(Boolean)
-                    .join(" • ")}
-                </p>
-                <p className="text-sm text-slate-500">
-                  {formatEventDateRange(selectedEvent.startAt, selectedEvent.endAt)}
-                </p>
+                {isCombinedView ? (
+                  <>
+                    <div className="space-y-1">
+                      {combinedEventEntries.map((event) => (
+                        <div
+                          key={event.id}
+                          className="grid grid-cols-[max-content_max-content_1fr] items-baseline gap-2 text-sm text-slate-500"
+                          title={`${event.eventCode} - ${event.name}`}
+                        >
+                          <span className="font-mono">{event.eventCode}</span>
+                          <span>-</span>
+                          <span className="truncate">{event.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold text-slate-600">
+                      {selectedEvent.eventCode}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {[
+                        selectedEvent.locationVenue,
+                        selectedEvent.locationCity,
+                        selectedEvent.locationRegion,
+                      ]
+                        .filter(Boolean)
+                        .join(" • ")}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {formatEventDateRange(
+                        selectedEvent.startAt,
+                        selectedEvent.endAt,
+                      )}
+                    </p>
+                  </>
+                )}
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <article className="rounded-2xl bg-slate-950 px-5 py-4 text-white">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
-                  Total Teams
-                </p>
-                <strong className="mt-3 block text-3xl font-black">
-                  {totalTeams}
-                </strong>
-              </article>
-              <article className="rounded-2xl bg-slate-800 px-5 py-4 text-white">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
-                  Pre-Checked
-                </p>
-                <strong className="mt-3 block text-3xl font-black">
-                  {preCheckedCount}
-                </strong>
-              </article>
-              <article className="rounded-2xl bg-slate-700 px-5 py-4 text-white">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-300">
-                  Fully Checked
-                </p>
-                <strong className="mt-3 block text-3xl font-black">
-                  {fullyCheckedCount}
-                </strong>
-              </article>
+              {isCombinedView
+                ? combinedMetricCards.map((card) => (
+                    <CombinedMetricCard key={card.title} {...card} />
+                  ))
+                : (
+                  <>
+                    <article className="rounded-2xl bg-slate-950 px-5 py-4 text-white">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                        Total Teams
+                      </p>
+                      <strong className="mt-3 block text-3xl font-black">
+                        {totalTeams}
+                      </strong>
+                    </article>
+                    <article className="rounded-2xl bg-slate-800 px-5 py-4 text-white">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                        Pre-Checked
+                      </p>
+                      <strong className="mt-3 block text-3xl font-black">
+                        {preCheckedCount}
+                      </strong>
+                    </article>
+                    <article className="rounded-2xl bg-slate-700 px-5 py-4 text-white">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-300">
+                        Fully Checked
+                      </p>
+                      <strong className="mt-3 block text-3xl font-black">
+                        {fullyCheckedCount}
+                      </strong>
+                    </article>
+                  </>
+                )}
             </div>
 
             <div className="flex">
@@ -1302,7 +2156,7 @@ function AppScreen() {
                   className="rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
                   onClick={() => navigate("/")}
                 >
-                  Change Event
+                  {isCombinedView ? "Back To Dashboards" : "Change Event"}
                 </button>
               </div>
             </div>
@@ -1321,7 +2175,7 @@ function AppScreen() {
             </div>
 
             <div className="mt-5 flex flex-col items-center gap-5 sm:flex-row sm:items-center">
-              <div className="relative h-48 w-48 rounded-full" style={pieStyle}>
+              <div className="group relative h-48 w-48 rounded-full" style={pieStyle}>
                 <div className="absolute inset-[22%] flex items-center justify-center rounded-full bg-white">
                   <div className="text-center">
                     <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
@@ -1332,43 +2186,150 @@ function AppScreen() {
                     </p>
                   </div>
                 </div>
+                {isCombinedView ? (
+                  <BreakdownTooltip
+                    items={combinedBreakdowns.map((item) => ({
+                      key: `pie-${item.eventId}`,
+                      label: item.eventCode,
+                      value: `${item.fullyChecked}/${item.preCheckedOnly}/${item.notPreChecked}`,
+                    }))}
+                  />
+                ) : null}
               </div>
 
               <div className="grid flex-1 gap-3 text-sm">
-                <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="h-3 w-3 rounded-full bg-slate-950" />
-                    <span className="font-semibold text-slate-700">
-                      Fully checked in
-                    </span>
-                  </div>
-                  <span className="font-bold text-slate-950">
-                    {fullyCheckedCount}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="h-3 w-3 rounded-full bg-slate-600" />
-                    <span className="font-semibold text-slate-700">
-                      Pre-checked only
-                    </span>
-                  </div>
-                  <span className="font-bold text-slate-950">
-                    {preCheckedOnlyCount}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="h-3 w-3 rounded-full bg-slate-300" />
-                    <span className="font-semibold text-slate-700">
-                      Not pre-checked
-                    </span>
-                  </div>
-                  <span className="font-bold text-slate-950">
-                    {notPreCheckedCount}
-                  </span>
-                </div>
+                {isCombinedView ? (
+                  <>
+                    <CombinedLegendRow
+                      color={combinedStatusPalettes.checkedIn[1]}
+                      label="Fully checked in"
+                      value={fullyCheckedCount}
+                      tooltipItems={combinedBreakdowns.map((item) => ({
+                        key: `legend-full-${item.eventId}`,
+                        label: item.eventCode,
+                        value: item.fullyChecked,
+                      }))}
+                    />
+                    <CombinedLegendRow
+                      color={combinedStatusPalettes.preCheckedOnly[1]}
+                      label="Pre-checked only"
+                      value={preCheckedOnlyCount}
+                      tooltipItems={combinedBreakdowns.map((item) => ({
+                        key: `legend-pre-${item.eventId}`,
+                        label: item.eventCode,
+                        value: item.preCheckedOnly,
+                      }))}
+                    />
+                    <CombinedLegendRow
+                      color={combinedStatusPalettes.notPreChecked[1]}
+                      label="Not pre-checked"
+                      value={notPreCheckedCount}
+                      tooltipItems={combinedBreakdowns.map((item) => ({
+                        key: `legend-pending-${item.eventId}`,
+                        label: item.eventCode,
+                        value: item.notPreChecked,
+                      }))}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="h-3 w-3 rounded-full bg-slate-950" />
+                        <span className="font-semibold text-slate-700">
+                          Fully checked in
+                        </span>
+                      </div>
+                      <span className="font-bold text-slate-950">
+                        {fullyCheckedCount}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="h-3 w-3 rounded-full bg-slate-600" />
+                        <span className="font-semibold text-slate-700">
+                          Pre-checked only
+                        </span>
+                      </div>
+                      <span className="font-bold text-slate-950">
+                        {preCheckedOnlyCount}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="h-3 w-3 rounded-full bg-slate-300" />
+                        <span className="font-semibold text-slate-700">
+                          Not pre-checked
+                        </span>
+                      </div>
+                      <span className="font-bold text-slate-950">
+                        {notPreCheckedCount}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+              {isCombinedView ? (
+                <>
+                  <CombinedTotalRow
+                    label="Total Estimated Wristbands"
+                    value={estimatedWristbandsTotal}
+                    tooltipItems={combinedBreakdowns.map((item) => ({
+                      key: `est-${item.eventId}`,
+                      label: item.eventCode,
+                      value: item.estimatedWristbands,
+                    }))}
+                  />
+                  <CombinedTotalRow
+                    label="Total Wristbands Distributed"
+                    value={actualWristbandsDistributedTotal}
+                    tooltipItems={combinedBreakdowns.map((item) => ({
+                      key: `act-${item.eventId}`,
+                      label: item.eventCode,
+                      value: item.actualWristbands,
+                    }))}
+                  />
+                  <CombinedTotalRow
+                    label="Total Parking Passes Distributed"
+                    value={parkingPassesDistributedTotal}
+                    tooltipItems={combinedBreakdowns.map((item) => ({
+                      key: `park-${item.eventId}`,
+                      label: item.eventCode,
+                      value: item.parkingPasses,
+                    }))}
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="flex items-baseline justify-between gap-4 rounded-xl bg-slate-50 px-3 py-2">
+                    <p className="text-sm font-semibold text-slate-700">
+                      Total Estimated Wristbands
+                    </p>
+                    <p className="text-xl font-black text-slate-950">
+                      {estimatedWristbandsTotal}
+                    </p>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4 rounded-xl bg-slate-50 px-3 py-2">
+                    <p className="text-sm font-semibold text-slate-700">
+                      Total Wristbands Distributed
+                    </p>
+                    <p className="text-xl font-black text-slate-950">
+                      {actualWristbandsDistributedTotal}
+                    </p>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4 rounded-xl bg-slate-50 px-3 py-2">
+                    <p className="text-sm font-semibold text-slate-700">
+                      Total Parking Passes Distributed
+                    </p>
+                    <p className="text-xl font-black text-slate-950">
+                      {parkingPassesDistributedTotal}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </section>
@@ -1436,7 +2397,11 @@ function AppScreen() {
                 value={searchTerm}
                 onChange={handleSearchTermChange}
                 className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-                placeholder="Team #, name, organization, contact, or phone"
+                placeholder={
+                  isCombinedView
+                    ? "Search by team number"
+                    : "Team #, name, organization, contact, or phone"
+                }
               />
             </label>
           </div>
@@ -1454,7 +2419,7 @@ function AppScreen() {
             <p>
               Sorted by{" "}
               <strong className="text-slate-950">
-                {columns.find((column) => column.key === sortConfig.key)?.label}
+                {currentColumns.find((column) => column.key === sortConfig.key)?.label}
               </strong>{" "}
               ({sortConfig.direction})
             </p>
@@ -1464,7 +2429,7 @@ function AppScreen() {
             <table className="min-w-full border-separate border-spacing-0">
               <thead>
                 <tr className="bg-slate-50">
-                  {columns.map((column) => {
+                  {currentColumns.map((column) => {
                     const isActive = sortConfig.key === column.key;
                     const arrow = isActive
                       ? sortConfig.direction === "asc"
@@ -1494,8 +2459,32 @@ function AppScreen() {
               </thead>
               <tbody>
                 {paginatedTeams.length > 0 ? (
-                  <>
-                    {paginatedTeams.map((team) => (
+                  isCombinedView ? (
+                    paginatedTeams.map((team) => (
+                      <tr
+                        key={team.id}
+                        className="h-14 cursor-pointer even:bg-slate-50/70 hover:bg-slate-100"
+                        onClick={() => setSelectedTeamId(team.id)}
+                      >
+                        <td className="border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-900">
+                          {team.eventCode}
+                        </td>
+                        <td className="border-b border-slate-200 px-6 py-4 text-sm font-semibold text-slate-900">
+                          {team.teamNumber}
+                        </td>
+                        <td className="border-b border-slate-200 px-6 py-4 text-sm text-slate-700">
+                          {team.teamName}
+                        </td>
+                        <td className="border-b border-slate-200 px-6 py-4">
+                          <StatBadge value={team.preCheckedIn} />
+                        </td>
+                        <td className="border-b border-slate-200 px-6 py-4">
+                          <StatBadge value={team.checkedIn} />
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    paginatedTeams.map((team) => (
                       <tr
                         key={team.id}
                         className="h-14 cursor-pointer even:bg-slate-50/70 hover:bg-slate-100"
@@ -1514,15 +2503,19 @@ function AppScreen() {
                           <StatBadge value={team.checkedIn} />
                         </td>
                       </tr>
-                    ))}
-                  </>
+                    ))
+                  )
                 ) : (
                   <tr>
                     <td
                       className="px-6 py-14 text-center text-sm text-slate-500"
-                      colSpan={columns.length}
+                      colSpan={currentColumns.length}
                     >
-                      {isLoadingTeams
+                      {isCombinedView
+                        ? isLoadingCombinedTeams
+                          ? "Loading teams..."
+                          : "No teams match the selected filters."
+                        : isLoadingTeams
                         ? "Loading teams..."
                         : "No teams match the selected filters."}
                     </td>
@@ -1675,7 +2668,7 @@ function AppScreen() {
 
       {selectedTeam ? (
         <div
-          className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/40 py-4 sm:py-6 px-2 sm:px-4"
+          className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/40 py-4 sm:py-6 px-2 sm:px-4 backdrop-blur-sm"
           onClick={closeTeamModal}
         >
           <section
@@ -1690,62 +2683,73 @@ function AppScreen() {
                   Team {selectedTeam.teamNumber}: {selectedTeam.teamName}
                 </h2>
               </div>
-              <button
-                type="button"
-                className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-                onClick={closeTeamModal}
-                aria-label="Close team details"
-              >
-                Close
-              </button>
+              {!(checkInStep === "result" && pickupResult === "success") ? (
+                <button
+                  type="button"
+                  className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                  onClick={closeTeamModal}
+                  aria-label="Close team details"
+                >
+                  Close
+                </button>
+              ) : null}
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
               <div className="grid shrink-0 gap-3 lg:grid-cols-3">
-                  <DetailCard
-                    label="Organization"
-                    value={selectedTeam.organization}
-                    copyKey="organization"
-                    copiedField={copiedField}
-                    onCopy={handleCopy}
-                  />
-                  <DetailCard
-                    label="Contact Name"
-                    value={selectedTeam.contactName}
-                    copyKey="contactName"
-                    copiedField={copiedField}
-                    onCopy={handleCopy}
-                  />
-                  <DetailCard
-                    label="Contact Number"
-                    value={selectedTeam.contactNumber}
-                    copyKey="contactNumber"
-                    copiedField={copiedField}
-                    onCopy={handleCopy}
-                  />
+                <DetailCard
+                  label="Organization"
+                  value={selectedTeam.organization}
+                  copyKey="organization"
+                  copiedField={copiedField}
+                  onCopy={handleCopy}
+                />
+                <DetailCard
+                  label="Contact Name"
+                  value={selectedTeam.contactName}
+                  copyKey="contactName"
+                  copiedField={copiedField}
+                  onCopy={handleCopy}
+                />
+                <DetailCard
+                  label="Contact Number"
+                  value={formatPhoneDisplay(selectedTeam.contactNumber)}
+                  copyKey="contactNumber"
+                  copiedField={copiedField}
+                  onCopy={handleCopy}
+                />
               </div>
 
-              <div className="mt-3 grid shrink-0 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
-                  <SimpleField
-                    label="Pre-Checked In"
-                    value={getStatusLabel(selectedTeam.preCheckedIn)}
-                  />
-                  <SimpleField
-                    label="Fully Checked In"
-                    value={getStatusLabel(selectedTeam.checkedIn)}
-                  />
-                  <SimpleField
-                    label="Est Wristbands"
-                    value={selectedTeam.wristbandsEstimated}
-                  />
-                  <SimpleField
-                    label="Actual Wristbands"
-                    value={selectedTeam.wristbandsActual ?? "Not entered"}
-                  />
-                  <SimpleField
-                    label="Parking Pass"
-                    value={getStatusLabel(selectedTeam.parkingPass)}
-                  />
+              <div className="mt-3 grid shrink-0 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <TeamProgressField
+                  preCheckedIn={
+                    checkInStep === "result" && pickupResult === "success"
+                      ? true
+                      : selectedTeam.preCheckedIn
+                  }
+                  checkedIn={
+                    checkInStep === "result" && pickupResult === "success"
+                      ? true
+                      : selectedTeam.checkedIn
+                  }
+                  className={
+                    checkInStep === "result" && pickupResult === "success"
+                      ? "lg:col-span-4"
+                      : ""
+                  }
+                />
+                {!(checkInStep === "result" && pickupResult === "success") ? (
+                  <>
+                    <SimpleField
+                      label="Wristbands"
+                      value={selectedTeamWristbandsSummary}
+                    />
+                    <SimpleField
+                      label="Parking Pass"
+                      value={selectedTeamParkingSummary}
+                    />
+                  </>
+                ) : null}
               </div>
 
               <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1885,15 +2889,17 @@ function AppScreen() {
                         <div className="flex min-h-0 w-full shrink-0 flex-col gap-4 overflow-y-auto pr-1">
                           <div className="grid gap-2 sm:grid-cols-2">
                             <CopyableSimpleField
-                              label="Full Name"
+                              label="Pick Up Full Name"
                               value={selectedTeam.pickupName || "Not recorded"}
                               copyKey="pickupName"
                               copiedField={copiedField}
                               onCopy={handleCopy}
                             />
                             <CopyableSimpleField
-                              label="Phone Number"
-                              value={formatPhoneDisplay(selectedTeam.pickupPhoneNumber)}
+                              label="Pick Up Phone Number"
+                              value={formatPhoneDisplay(
+                                selectedTeam.pickupPhoneNumber,
+                              )}
                               copyKey="pickupPhoneNumber"
                               copiedField={copiedField}
                               onCopy={handleCopy}
@@ -1913,15 +2919,17 @@ function AppScreen() {
                         <div className="flex min-h-0 w-full shrink-0 flex-col gap-4 overflow-y-auto pl-4 pr-1">
                           <div className="grid gap-2 sm:grid-cols-2">
                             <CopyableSimpleField
-                              label="Full Name"
+                              label="Pick Up Full Name"
                               value={selectedTeam.pickupName || "Not recorded"}
                               copyKey="pickupName"
                               copiedField={copiedField}
                               onCopy={handleCopy}
                             />
                             <CopyableSimpleField
-                              label="Phone Number"
-                              value={formatPhoneDisplay(selectedTeam.pickupPhoneNumber)}
+                              label="Pick Up Phone Number"
+                              value={formatPhoneDisplay(
+                                selectedTeam.pickupPhoneNumber,
+                              )}
                               copyKey="pickupPhoneNumber"
                               copiedField={copiedField}
                               onCopy={handleCopy}
@@ -1933,7 +2941,8 @@ function AppScreen() {
                                 Pickup Notes
                               </p>
                               <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-xl bg-slate-50 px-5 py-4 text-left text-sm font-medium leading-7 text-slate-700">
-                                {selectedTeam.pickupNotes?.trim() || "No notes recorded."}
+                                {selectedTeam.pickupNotes?.trim() ||
+                                  "No notes recorded."}
                               </div>
                             </div>
                           </div>
@@ -1960,108 +2969,116 @@ function AppScreen() {
                       </p>
 
                       <div className="mt-2.5 space-y-2.5">
-                    <div className="grid gap-2.5 lg:grid-cols-[1fr_auto] lg:items-start">
-                      <label className="grid gap-1.5">
-                        <span className="text-sm font-semibold text-slate-700">
-                          Enter the actual number of wristbands
-                        </span>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={wristbandsActualInput}
-                          onBeforeInput={(event) => {
-                            if (event.data && /\D/.test(event.data)) {
-                              event.preventDefault();
+                        <div className="grid gap-2.5 lg:grid-cols-[1fr_auto] lg:items-start">
+                          <label className="grid gap-1.5">
+                            <span className="text-sm font-semibold text-slate-700">
+                              Enter the actual number of wristbands
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={wristbandsActualInput}
+                              onBeforeInput={(event) => {
+                                if (event.data && /\D/.test(event.data)) {
+                                  event.preventDefault();
+                                }
+                              }}
+                              onPaste={(event) => {
+                                const pastedText =
+                                  event.clipboardData.getData("text");
+
+                                if (/\D/.test(pastedText)) {
+                                  event.preventDefault();
+                                  const digitsOnly = pastedText.replace(
+                                    /\D/g,
+                                    "",
+                                  );
+                                  const numericValue = Number(digitsOnly);
+
+                                  setWristbandsActualInput(digitsOnly);
+                                  setWristbandsError(
+                                    digitsOnly !== "" && numericValue > 13
+                                      ? "If more than 13 wristbands are needed, pick up extras at spectator check-in."
+                                      : "",
+                                  );
+                                }
+                              }}
+                              onChange={(event) => {
+                                const value = event.target.value.replace(
+                                  /\D/g,
+                                  "",
+                                );
+                                const numericValue = Number(value);
+
+                                setWristbandsActualInput(value);
+                                setWristbandsError(
+                                  value !== "" && numericValue > 13
+                                    ? "If more than 13 wristbands are needed, pick up extras at spectator check-in."
+                                    : "",
+                                );
+                              }}
+                              className="h-10 rounded-2xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                              placeholder="0-13"
+                            />
+                            <span
+                              className={`min-h-5 text-sm font-semibold ${
+                                wristbandsError
+                                  ? "text-red-600"
+                                  : "text-transparent"
+                              }`}
+                            >
+                              {wristbandsError || "No wristband error"}
+                            </span>
+                          </label>
+
+                          <div className="grid gap-1.5">
+                            <span className="text-sm font-semibold text-slate-700">
+                              Parking Pass
+                            </span>
+                            <button
+                              type="button"
+                              className={`min-w-28 rounded-2xl border px-4 py-2 text-center text-sm font-semibold transition ${
+                                parkingPassInput
+                                  ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                                  : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
+                              }`}
+                              onClick={() =>
+                                setParkingPassInput((current) => !current)
+                              }
+                            >
+                              {parkingPassInput ? "Yes" : "No"}
+                            </button>
+                          </div>
+                        </div>
+
+                        <label className="mt-2.5 grid gap-1.5">
+                          <span className="text-sm font-semibold text-slate-700">
+                            Optional notes
+                          </span>
+                          <textarea
+                            value={pickupNotes}
+                            maxLength={1000}
+                            onChange={(event) =>
+                              setPickupNotes(event.target.value)
                             }
-                          }}
-                          onPaste={(event) => {
-                            const pastedText =
-                              event.clipboardData.getData("text");
+                            className="h-14 resize-none rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                            placeholder="Add any optional notes for this pickup..."
+                          />
+                          <span className="text-right text-xs font-semibold text-slate-500">
+                            {pickupNotes.length}/1000
+                          </span>
+                        </label>
 
-                            if (/\D/.test(pastedText)) {
-                              event.preventDefault();
-                              const digitsOnly = pastedText.replace(/\D/g, "");
-                              const numericValue = Number(digitsOnly);
-
-                              setWristbandsActualInput(digitsOnly);
-                              setWristbandsError(
-                                digitsOnly !== "" && numericValue > 10
-                                  ? "Actual wristbands cannot be over 10."
-                                  : "",
-                              );
-                            }
-                          }}
-                          onChange={(event) => {
-                            const value = event.target.value.replace(/\D/g, "");
-                            const numericValue = Number(value);
-
-                            setWristbandsActualInput(value);
-                            setWristbandsError(
-                              value !== "" && numericValue > 10
-                                ? "Actual wristbands cannot be over 10."
-                                : "",
-                            );
-                          }}
-                          className="h-10 rounded-2xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-                          placeholder="0-10"
-                        />
-                        <span
-                          className={`min-h-5 text-sm font-semibold ${
-                            wristbandsError
-                              ? "text-red-600"
-                              : "text-transparent"
-                          }`}
-                        >
-                          {wristbandsError || "No wristband error"}
-                        </span>
-                      </label>
-
-                      <div className="grid gap-1.5">
-                        <span className="text-sm font-semibold text-slate-700">
-                          Parking Pass
-                        </span>
-                        <button
-                          type="button"
-                          className={`min-w-28 rounded-2xl border px-4 py-2 text-center text-sm font-semibold transition ${
-                            parkingPassInput
-                              ? "border-slate-900 bg-slate-900 text-white shadow-sm"
-                              : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
-                          }`}
-                          onClick={() =>
-                            setParkingPassInput((current) => !current)
-                          }
-                        >
-                          {parkingPassInput ? "Yes" : "No"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <label className="mt-2.5 grid gap-1.5">
-                      <span className="text-sm font-semibold text-slate-700">
-                        Optional notes
-                      </span>
-                      <textarea
-                        value={pickupNotes}
-                        maxLength={1000}
-                        onChange={(event) => setPickupNotes(event.target.value)}
-                        className="h-14 resize-none rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-                        placeholder="Add any optional notes for this pickup..."
-                      />
-                      <span className="text-right text-xs font-semibold text-slate-500">
-                        {pickupNotes.length}/1000
-                      </span>
-                    </label>
-
-                    <div className="mt-2.5 flex justify-end">
-                      <button
-                        type="button"
-                        className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-                        onClick={handleNextToAcknowledgement}
-                      >
-                        Next
-                      </button>
-                    </div>
+                        <div className="mt-2.5 flex justify-end">
+                          <button
+                            type="button"
+                            className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                            onClick={handleNextToAcknowledgement}
+                          >
+                            Next
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -2069,7 +3086,9 @@ function AppScreen() {
                       <div className="absolute inset-0 flex items-center justify-center rounded-[24px] bg-white/30 px-6 text-center">
                         <div className="max-w-xl rounded-3xl border border-amber-200 bg-amber-50/95 px-5 py-4 shadow-sm backdrop-blur-sm">
                           <p className="text-sm font-semibold leading-6 text-amber-950 sm:text-base">
-                            Team check-in unlocks after the Online Check-In Form is submitted. Changes can take up to 1 minute to appear.
+                            Team check-in unlocks after the Online Check-In Form
+                            is submitted. Changes can take up to 1 minute to
+                            appear.
                           </p>
                         </div>
                       </div>
@@ -2111,7 +3130,7 @@ function AppScreen() {
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <label className="grid gap-1.5">
                         <span className="text-sm font-semibold text-slate-700">
-                          Full Name
+                          Pick Up Full Name
                         </span>
                         <input
                           type="text"
@@ -2133,7 +3152,7 @@ function AppScreen() {
 
                       <label className="grid gap-1.5">
                         <span className="text-sm font-semibold text-slate-700">
-                          Phone number
+                          Pick Up Phone Number
                         </span>
                         <input
                           type="tel"
@@ -2155,10 +3174,13 @@ function AppScreen() {
                       </label>
                     </div>
                     <div className="mt-0.5 flex min-h-0 flex-1 flex-col rounded-3xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                        Signature
+                      </p>
                       <SignaturePadCanvas
                         ref={signaturePadRef}
                         penColor="#132231"
-                        className="min-h-36 flex-1 w-full rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50"
+                        className="mt-2 min-h-36 flex-1 w-full rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50"
                       />
                       <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
                         <p
@@ -2196,6 +3218,8 @@ function AppScreen() {
           </section>
         </div>
       ) : null}
+
+      {combinedDashboardModal}
     </main>
   );
 }
