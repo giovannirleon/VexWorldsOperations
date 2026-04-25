@@ -38,7 +38,8 @@ brew install --cask docker
 After Docker Desktop is installed:
 1. open Docker Desktop once
 2. wait for Docker to finish starting
-3. verify it works:
+3. Docker Desktop on macOS normally does not require `sudo` for `docker` or `docker compose`
+4. verify it works:
 
 ```bash
 docker --version
@@ -68,6 +69,14 @@ sudo usermod -aG docker "$USER"
 ```
 
 Then restart your shell or log out and back in so the Docker group change applies.
+
+If you want to apply the Docker group change immediately in the current shell:
+
+```bash
+sudo groupadd docker 2>/dev/null || true
+sudo usermod -aG docker "$USER"
+newgrp docker
+```
 
 Verify everything:
 
@@ -197,43 +206,45 @@ To install it:
 
 Use this branch only if you are deploying from Windows and want the app reachable from other devices on your local network.
 
-### 1. Enable mirrored networking
+This repo should still be run from inside WSL. The extra Windows steps below forward the Windows host ports to your WSL instance.
 
-Run in Windows PowerShell as Administrator:
+### 1. Get your WSL IP
 
-```powershell
-@"
-[wsl2]
-networkingMode=mirrored
-"@ | Set-Content "$env:USERPROFILE\.wslconfig"
+Run inside WSL:
+
+```bash
+hostname -I | awk '{print $1}'
 ```
 
-### 2. Restart WSL
+Example output:
 
-```powershell
-wsl --shutdown
+```text
+172.29.123.45
 ```
 
-### 3. Open Windows Firewall for app ports
+### 2. Add Windows port forwards
+
+Run in Windows PowerShell as Administrator. Replace `172.29.123.45` with your actual WSL IP:
 
 ```powershell
-New-NetFirewallRule -DisplayName "VexWorldsOperations 4000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4000
-New-NetFirewallRule -DisplayName "VexWorldsOperations 8080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=8080 connectaddress=172.29.123.45 connectport=8080
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=4000 connectaddress=172.29.123.45 connectport=4000
 ```
 
-### 4. Only if inbound traffic is still blocked, allow Hyper-V mirrored traffic
+### 3. Allow the forwarded ports through Windows Firewall
 
 ```powershell
-Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -DefaultInboundAction Allow
+New-NetFirewallRule -DisplayName "WSL Forward 8080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
+New-NetFirewallRule -DisplayName "WSL Forward 4000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4000
 ```
 
-### 5. Start WSL again
+### 4. Check that the forwards exist
 
 ```powershell
-wsl
+netsh interface portproxy show all
 ```
 
-### 6. Run standard deployment inside WSL
+### 5. Run standard deployment inside WSL
 
 ```bash
 cd ~/WorldsCheckIn/backend
@@ -243,7 +254,7 @@ cd ../frontend
 npm run deploy
 ```
 
-### 7. Verify from another LAN device
+### 6. Verify from Windows and from another LAN device
 
 Use the Windows machine's LAN IP:
 
@@ -251,6 +262,17 @@ Use the Windows machine's LAN IP:
 http://YOUR_WINDOWS_LAN_IP:4000
 http://YOUR_WINDOWS_LAN_IP:8080
 ```
+
+### 7. Remove the forwards later if needed
+
+```powershell
+netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=8080
+netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=4000
+```
+
+Important:
+- if WSL restarts and gets a new IP, update the portproxy rules with the new WSL IP
+- the deploy scripts should still use the Windows machine's outward-facing LAN IP for `CORS_ALLOWED_ORIGINS` and `VITE_API_BASE_URL`
 
 ## Interface Selection Notes
 
